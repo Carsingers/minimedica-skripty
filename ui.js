@@ -1,0 +1,173 @@
+/* MiniMedica · drobné ovládání (menu na mobilu, dropdown, FAQ akordeon, mapa)
+   Webflow: navbar lze nahradit nativním Navbar prvkem; FAQ jako Embed skript na stránkách s FAQ. */
+(function () {
+  "use strict";
+  var nav = document.querySelector(".navbar_component");
+  /* stín pod navigací po odscrollování (IntersectionObserver, žádný scroll listener) */
+  var sentinel = document.querySelector(".navbar_sentinel");
+  if (nav && sentinel && "IntersectionObserver" in window) {
+    new IntersectionObserver(function (es) { nav.classList.toggle("is-scrolled", !es[0].isIntersecting); }).observe(sentinel);
+  }
+  var btn = nav && nav.querySelector(".navbar_menu-button");
+  function zavritMenu() { nav.classList.remove("is-menu-open"); btn.setAttribute("aria-expanded", "false"); }
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var open = nav.classList.toggle("is-menu-open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && nav.classList.contains("is-menu-open")) { zavritMenu(); btn.focus(); } });
+    /* kotva nebo položka rozbalovacího menu menu zavře; přepínač dropdownu (aria-haspopup) ne, i když vede na kotvu (Webflow: /#ordinace) */
+    nav.querySelectorAll('.navbar_menu a[href^="/#"]:not([aria-haspopup]), .navbar_dropdown-link').forEach(function (a) { a.addEventListener("click", zavritMenu); });
+  }
+
+  /* Dropdowny a megamenu. Otevření: panel sjede o pár px shora a rozsvítí se, položky postupně (stagger 50 ms).
+     Zavření je rychlejší než otevření, nový klik animaci přeruší. Bez GSAP nebo s omezeným pohybem: jen přepnutí / prolnutí. */
+  var gs = window.gsap, klid = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.querySelectorAll(".navbar_dropdown").forEach(function (dd) {
+    var toggle = dd.querySelector(".navbar_link"), list = dd.querySelector(".navbar_dropdown-list");
+    var polozky = list.querySelectorAll(".navbar_mega-card, .navbar_mega-link, .navbar_dropdown-list > .navbar_dropdown-link");
+    var otevreno = false;
+    function set(open) {
+      if (open === otevreno) return;
+      otevreno = open;
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      if (!gs) { list.classList.toggle("hide", !open); return; }
+      gs.killTweensOf([list, polozky]);
+      if (open) {
+        list.classList.remove("hide");
+        /* jen průhlednost, ne autoAlpha: odkazy jdou zaměřit klávesnicí hned od začátku animace */
+        if (klid) { gs.fromTo(list, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power1.out" }); return; }
+        gs.fromTo(list, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.28, ease: "power3.out", clearProps: "transform" });
+        gs.fromTo(polozky, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.32, ease: "power3.out", stagger: 0.05, delay: 0.04, clearProps: "transform,opacity" });
+      } else {
+        gs.to(list, { autoAlpha: 0, y: klid ? 0 : -6, duration: 0.16, ease: "power2.out", onComplete: function () { list.classList.add("hide"); gs.set(list, { clearProps: "all" }); } });
+      }
+    }
+    toggle.addEventListener("click", function (e) { e.preventDefault(); set(!otevreno); });
+    /* Na počítači s myší se otevírá najetím: krátká prodleva proti náhodnému přejetí, při odjezdu chvíle na přesun do panelu. */
+    var mys = window.matchMedia && matchMedia("(hover: hover) and (pointer: fine) and (min-width: 992px)"), casovac;
+    dd.addEventListener("mouseenter", function () { if (!mys || !mys.matches) return; clearTimeout(casovac); casovac = setTimeout(function () { set(true); }, 80); });
+    dd.addEventListener("mouseleave", function () { if (!mys || !mys.matches) return; clearTimeout(casovac); casovac = setTimeout(function () { set(false); }, 200); });
+    dd.addEventListener("keydown", function (e) { if (e.key === "Escape") { set(false); toggle.focus(); } });
+    document.addEventListener("click", function (e) { if (!dd.contains(e.target)) set(false); });
+  });
+
+  /* FAQ akordeon. Webflow neumí id z CMS: odpověď bez id dostane faq-1, faq-2 … podle pořadí na stránce
+     a otázka odpovídající aria-controls. */
+  var faqCislo = 0;
+  document.querySelectorAll(".faq_item").forEach(function (item) {
+    var q = item.querySelector(".faq_question"), a = item.querySelector(".faq_answer");
+    if (!q) return;
+    faqCislo++;
+    if (a && !a.id) {
+      while (document.getElementById("faq-" + faqCislo)) faqCislo++;
+      a.id = "faq-" + faqCislo;
+    }
+    if (a && !q.getAttribute("aria-controls")) q.setAttribute("aria-controls", a.id);
+    if (!q.hasAttribute("aria-expanded")) q.setAttribute("aria-expanded", item.classList.contains("is-open") ? "true" : "false");
+    q.addEventListener("click", function (e) {
+      if (q.tagName !== "BUTTON") e.preventDefault(); /* odkaz nebo div místo tlačítka: neskákat na „#“ */
+      var open = item.classList.toggle("is-open");
+      q.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  });
+
+  /* Formuláře: ve Webflow nativní Form Block (stavy w-form-done / w-form-fail). Tady jen ukázka chování.
+     Formulář uvnitř .w-form (Webflow) se nezachytává: validuje prohlížeč (required, type=email) a odesílá Webflow sám. */
+  document.querySelectorAll("form[data-mm-form]").forEach(function (form) {
+    if (form.closest(".w-form")) return;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var ok = true;
+      form.querySelectorAll("[required]").forEach(function (f) {
+        var bad = f.type === "checkbox" ? !f.checked : !f.value.trim();
+        f.classList.toggle("is-error", bad); f.setAttribute("aria-invalid", bad ? "true" : "false");
+        if (bad) ok = false;
+      });
+      var wrap = form.closest(".form_component");
+      var err = wrap.querySelector(".form_message-error"), done = wrap.querySelector(".form_message-success");
+      if (!ok) { err.classList.remove("hide"); var first = form.querySelector(".is-error"); if (first) first.focus(); return; }
+      err.classList.add("hide"); form.classList.add("hide"); done.classList.remove("hide");
+    });
+  });
+
+  /* Filtr seznamu (Webflow: Finsweet Attributes List Filter) */
+  document.querySelectorAll("[data-mm-filter]").forEach(function (bar) {
+    var list = document.querySelector(bar.dataset.mmFilter);
+    /* Webflow neumí vypsat Multi-reference do atributu: položka s data-filter-item="ze-stitku" si hodnotu složí
+       ze štítků [data-filter-slug] uvnitř (vnořený list Ordinace). Bez štítků (celá síť) patří ke všem hodnotám filtru. */
+    var vsechny = Array.prototype.map.call(bar.querySelectorAll("[data-filter-value]"), function (b) { return b.dataset.filterValue; })
+      .filter(function (v) { return v && v !== "vse"; });
+    if (list) list.querySelectorAll('[data-filter-item="ze-stitku"]').forEach(function (it) {
+      var slugy = Array.prototype.map.call(it.querySelectorAll("[data-filter-slug]"), function (s) { return s.dataset.filterSlug.trim(); }).filter(Boolean);
+      it.dataset.filterItem = (slugy.length ? slugy : vsechny).join(" ");
+    });
+    bar.querySelectorAll("[data-filter-value]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.dataset.filterValue;
+        bar.querySelectorAll("[data-filter-value]").forEach(function (b) { b.classList.toggle("is-active", b === btn); b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+        list.querySelectorAll("[data-filter-item]").forEach(function (it) {
+          /* prošlé položky (engine: data-mm-proslo) zůstávají skryté v každém filtru */
+          it.classList.toggle("hide", it.hasAttribute("data-mm-proslo") || (v !== "vse" && (" " + it.dataset.filterItem + " ").indexOf(" " + v + " ") < 0));
+        });
+      });
+    });
+  });
+
+  /* Mobilní lišta ordinace: ukáže se, až úvodní tlačítka zmizí z obrazovky */
+  var lista = document.querySelector("[data-mm-lista]"), heroAkce = document.querySelector(".ordinace-hero_actions");
+  if (lista && heroAkce && "IntersectionObserver" in window) {
+    new IntersectionObserver(function (es) { lista.classList.toggle("is-visible", !es[0].isIntersecting && es[0].boundingClientRect.top < 0); }).observe(heroAkce);
+  }
+
+  /* Mapa a Navigovat z data-lat / data-lng na kořeni mapy (Webflow neumí složit URL ze dvou polí).
+     Mapa (OpenStreetMap) se načte až po klepnutí na „Zobrazit mapu“, do té doby žádný požadavek ven.
+     Navigovat ve stejné sekci dostane trasu v Google Mapách; bez platných souřadnic zůstane záloha #kontakt a mapa se skryje. */
+  function souradnice(v) { var n = parseFloat(String(v == null ? "" : v).replace(",", ".")); return isFinite(n) ? n : NaN; }
+  document.querySelectorAll("[data-mm-mapa]").forEach(function (m) {
+    var lat = souradnice(m.dataset.lat), lng = souradnice(m.dataset.lng);
+    if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (!lat && !lng)) { m.classList.add("hide"); return; }
+    (m.closest("section") || document).querySelectorAll('[data-mm="navigovat"]').forEach(function (a) {
+      a.href = "https://www.google.com/maps/dir/?api=1&destination=" + lat + "," + lng;
+      a.target = "_blank"; a.rel = "noopener";
+    });
+    var b = m.querySelector(".kontakt_map-activate");
+    if (b) b.addEventListener("click", function () {
+      var f = m.querySelector("iframe.kontakt_map-frame");
+      if (!f) {
+        f = document.createElement("iframe");
+        f.className = "kontakt_map-frame";
+        var adresa = String(m.dataset.adresa || "").trim();
+        f.title = adresa ? "Mapa: " + adresa : "Mapa";
+        f.setAttribute("loading", "lazy");
+        m.appendChild(f);
+      }
+      if (!f.getAttribute("src")) f.src = "https://www.openstreetmap.org/export/embed.html?bbox=" + (lng - 0.006).toFixed(6) + "%2C" + (lat - 0.003).toFixed(6) + "%2C" +
+        (lng + 0.006).toFixed(6) + "%2C" + (lat + 0.003).toFixed(6) + "&layer=mapnik&marker=" + lat + "%2C" + lng;
+      m.classList.add("is-active");
+    });
+  });
+
+  /* Prázdný stav filtru */
+  function obnovPrazdne() {
+    document.querySelectorAll("[data-filter-empty]").forEach(function (e) {
+      var list = document.querySelector(e.dataset.filterEmpty);
+      e.classList.toggle("hide", !!list.querySelector("[data-filter-item]:not(.hide)"));
+    });
+  }
+  document.querySelectorAll("[data-mm-filter] [data-filter-value]").forEach(function (b) { b.addEventListener("click", function () { setTimeout(obnovPrazdne, 0); }); });
+
+  /* Předvyplnění formuláře: „Mám zájem“ u pozice, „To jsem já“ u úrovně L1–L3 */
+  document.querySelectorAll("[data-mm-predvyplnit]").forEach(function (a) {
+    a.addEventListener("click", function () {
+      var form = document.querySelector(a.getAttribute("href") + " form");
+      if (!form) return;
+      var faze = a.dataset.faze, pozice = a.dataset.pozice;
+      if (faze && form.elements.faze) form.elements.faze.value = faze;
+      if (form.elements.pozice) form.elements.pozice.value = pozice || "";
+      var k = form.querySelector("[data-mm-kontext]");
+      if (k) { k.textContent = pozice ? "Máte zájem o pozici: " + pozice : (faze ? "Vaše fáze: " + faze : ""); k.classList.toggle("hide", !(pozice || faze)); }
+      setTimeout(function () { var f = form.querySelector("input:not([type=hidden])"); if (f) f.focus({ preventScroll: true }); }, 500);
+    });
+  });
+})();
