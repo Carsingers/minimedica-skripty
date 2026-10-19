@@ -157,6 +157,12 @@
   }
   document.querySelectorAll("[data-mm-filter] [data-filter-value]").forEach(function (b) { b.addEventListener("click", function () { setTimeout(obnovPrazdne, 0); }); });
 
+  /* Odkaz v roli tlačítka (Webflow nevzal <button>, např. „Uložit kontakt“): mezerník ho stiskne, místo aby posunul stránku */
+  document.addEventListener("keydown", function (e) {
+    var a = e.target.closest && e.target.closest('a[role="button"]');
+    if (a && (e.key === " " || e.key === "Spacebar")) { e.preventDefault(); a.click(); }
+  });
+
   /* Předvyplnění formuláře: „Mám zájem“ u pozice, „To jsem já“ u úrovně L1–L3 */
   document.querySelectorAll("[data-mm-predvyplnit]").forEach(function (a) {
     a.addEventListener("click", function () {
@@ -164,6 +170,8 @@
       if (!form) return;
       var faze = a.dataset.faze, pozice = a.dataset.pozice;
       if (faze && form.elements.faze) form.elements.faze.value = faze;
+      /* lékařská pozice fázi nenese: nenechat ve výběru sestru z předchozího kliku */
+      else if (pozice && form.elements.faze && /sestra/i.test(form.elements.faze.value)) form.elements.faze.selectedIndex = 0;
       if (form.elements.pozice) form.elements.pozice.value = pozice || "";
       var k = form.querySelector("[data-mm-kontext]");
       if (k) { k.textContent = pozice ? "Máte zájem o pozici: " + pozice : (faze ? "Vaše fáze: " + faze : ""); k.classList.toggle("hide", !(pozice || faze)); }

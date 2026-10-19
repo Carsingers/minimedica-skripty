@@ -12,25 +12,70 @@
   "use strict";
   if (!window.gsap || !window.ScrollTrigger) return;
   gsap.registerPlugin(ScrollTrigger);
-  if (window.SplitText) gsap.registerPlugin(SplitText);
   function ukazUvod() { document.documentElement.classList.remove("mm-intro"); }
   var EASE = "power3.out", START = "top 88%";
   function vse(s, root) { return Array.prototype.slice.call((root || document).querySelectorAll(s)); }
   var hotovo = new WeakSet();
-  function volne(els) { return els.filter(function (el) { return el && !hotovo.has(el) && !el.closest(".hide, .navbar_component, .action-bar_component"); }); }
+  /* bez boxu (prázdná skupina Rádce s display: none) ne: ScrollTrigger s once by se hned smazal a refresh na něm spadl */
+  function volne(els) { return els.filter(function (el) { return el && !hotovo.has(el) && el.getClientRects().length > 0 && !el.closest(".hide, .navbar_component, .action-bar_component"); }); }
   function oznac(els) { els.forEach(function (el) { hotovo.add(el); }); }
   /* blok, uvnitř kterého už něco animujeme, se znovu neanimuje (jinak by se dvě „from“ animace přetahovaly) */
   function maOznacene(el) { var d = el.getElementsByTagName("*"); for (var i = 0; i < d.length; i++) if (hotovo.has(d[i])) return true; return false; }
-  /* Nadpis: řádky vyjedou zpoza masky, pudrové zvýraznění se „dotáhne“ zleva. Po dojetí se rozdělení vrátí do původního HTML. */
+  /* Řádky nadpisu přesně podle hotového zalomení. SplitText 3.13 bere nezlomitelnou mezeru jako obyčejnou a mezi slovy
+     ze dvou sousedních prvků (konec „a&nbsp;“ a span zvýraznění, tečka za spanem) nechá zlom, který hotový text nemá:
+     během animace se láme jinak a po vrácení slovo poskočí. Proto se zlomy změří na hotovém textu (Range po znacích)
+     a řádky se vyříznou i s vnořenými spany (extractContents). Vrací řádky a funkci, která vrátí původní HTML. */
+  function radkyNadpisu(el) {
+    var html = el.innerHTML, zlomy = [], horni = null, uzel, i, rc;
+    var r = document.createRange(), tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    while ((uzel = tw.nextNode())) {
+      for (i = 0; i < uzel.data.length; i++) {
+        if (/\s/.test(uzel.data.charAt(i))) continue;
+        r.setStart(uzel, i); r.setEnd(uzel, i + 1);
+        rc = r.getClientRects()[0];
+        if (!rc) continue;
+        if (horni !== null && rc.top > horni + rc.height / 2) zlomy.push([uzel, i]);
+        horni = rc.top;
+      }
+    }
+    var casti = [];
+    for (i = zlomy.length - 1; i >= 0; i--) {
+      r.setStart(zlomy[i][0], zlomy[i][1]); r.setEnd(el, el.childNodes.length);
+      casti.unshift(r.extractContents());
+    }
+    r.setStart(el, 0); r.setEnd(el, el.childNodes.length);
+    casti.unshift(r.extractContents());
+    var radky = casti.map(function (cast) {
+      var maska = document.createElement("div"), radek = document.createElement("div");
+      maska.className = "mm-line-mask"; maska.style.cssText = "display:block;overflow:clip";
+      radek.className = "mm-line"; radek.style.display = "block";
+      radek.appendChild(cast); maska.appendChild(radek); el.appendChild(maska);
+      return radek;
+    });
+    return { lines: radky, revert: function () { el.innerHTML = html; } };
+  }
+  /* Nadpis: řádky vyjedou zpoza masky, pudrové zvýraznění se „dotáhne“ zleva. Po dojetí se vrátí původní HTML. */
   function revealNadpisu(el, vars) {
     vars = vars || {};
-    if (!window.SplitText) return gsap.from(el, Object.assign({ y: 18, autoAlpha: 0, duration: 0.8, ease: EASE }, vars));
-    var sp = SplitText.create(el, { type: "lines", mask: "lines", linesClass: "mm-line" });
+    var sp = radkyNadpisu(el);
     var t = gsap.timeline(Object.assign({ onComplete: function () { sp.revert(); } }, vars));
     t.from(sp.lines, { yPercent: 115, duration: 1, ease: "expo.out", stagger: 0.09 });
     var hl = el.querySelectorAll(".text-style-highlight");
     if (hl.length) t.fromTo(hl, { "--hl": "0%" }, { "--hl": "100%", duration: 0.8, ease: "power3.inOut", stagger: 0.1 }, 0.45);
     return t;
+  }
+  /* Tlačítko a čip mají CSS přechod na transform: „from“ by si jako cíl uložil mezihodnotu přechodu a prvek by zůstal
+     posunutý. Během nástupu přechod vypnout, po dojetí transform i přechod uklidit (hover pak funguje dál). */
+  function bezPrechodu(els, vars) {
+    var p = [].concat(els).filter(function (el) {
+      var cs = el && getComputedStyle(el);
+      return cs && /transform|all/.test(cs.transitionProperty) && parseFloat(cs.transitionDuration) > 0;
+    });
+    if (!p.length) return vars;
+    p.forEach(function (el) { el.style.transition = "none"; });
+    var hotovo = vars.onComplete;
+    vars.onComplete = function () { gsap.set(p, { clearProps: "transform,transition" }); if (hotovo) hotovo.apply(this, arguments); };
+    return vars;
   }
   function klidnyRezim() { return window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches; }
 
@@ -42,23 +87,35 @@
     gsap.ticker.add(function (t) { lenis.raf(t * 1000); });
     gsap.ticker.lagSmoothing(0);
     window.mmLenis = lenis;
-    /* kotvy na stejné stránce: plynule a pod sticky navigaci */
-    document.addEventListener("click", function (e) {
-      var a = e.target.closest && e.target.closest('a[href*="#"]');
-      /* klik už obsloužil někdo jiný (přepínač dropdownu s href /#ordinace, FAQ): nescrollovat */
-      if (!a || a.target === "_blank" || e.defaultPrevented) return;
-      var url = new URL(a.href, location.href);
-      if (url.pathname !== location.pathname || !url.hash || url.hash === "#") return;
-      var cil = document.getElementById(decodeURIComponent(url.hash.slice(1)));
-      if (!cil) return;
-      e.preventDefault();
-      /* během jízdy se obsah nad cílem může posunout (odhalování nadpisů), po dojetí cíl dorovnáme */
-      lenis.scrollTo(cil, { offset: -96, duration: 1.1, onComplete: function () {
-        if (Math.abs(cil.getBoundingClientRect().top - 96) > 2) lenis.scrollTo(cil, { offset: -96, duration: 0.35 });
-      } });
-      history.pushState(null, "", url.hash);
-    });
   }
+  /* Kotvy na stejné stránce: plynule (Lenis) nebo hned (omezený pohyb, scroll-margin-top 6rem), vždy pod sticky navigaci.
+     webflow.js má vlastní posun (click.wf-scroll), který sticky navigaci nezná a s Lenisem se pere: vypnout.
+     Fokus pak dostane cíl (skip link, čtečky), dřív to dělal webflow.js. */
+  function bezWebflowPosunu() { if (window.jQuery) window.jQuery(document).off("click.wf-scroll"); }
+  if (window.Webflow && window.Webflow.push) window.Webflow.push(bezWebflowPosunu); else bezWebflowPosunu();
+  function fokusNa(cil) {
+    /* předvyplnění formuláře už dalo fokus prvnímu poli uvnitř cíle: nebrat mu ho */
+    if (cil.contains(document.activeElement) && document.activeElement !== document.body) return;
+    if (!cil.matches("a[href], button, input, select, textarea, [tabindex]")) cil.setAttribute("tabindex", "-1");
+    cil.focus({ preventScroll: true });
+  }
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest('a[href*="#"]');
+    /* klik už obsloužil někdo jiný (přepínač dropdownu s href /#ordinace, FAQ): nescrollovat */
+    if (!a || a.target === "_blank" || e.defaultPrevented) return;
+    var url = new URL(a.href, location.href);
+    if (url.pathname !== location.pathname || !url.hash || url.hash === "#") return;
+    var cil = document.getElementById(decodeURIComponent(url.hash.slice(1)));
+    if (!cil) return;
+    e.preventDefault();
+    history.pushState(null, "", url.hash);
+    if (!lenis) { cil.scrollIntoView({ block: "start" }); fokusNa(cil); return; }
+    /* během jízdy se obsah nad cílem může posunout (odhalování nadpisů), po dojetí cíl dorovnáme */
+    lenis.scrollTo(cil, { offset: -96, duration: 1.1, onComplete: function () {
+      if (Math.abs(cil.getBoundingClientRect().top - 96) > 2) lenis.scrollTo(cil, { offset: -96, duration: 0.35, onComplete: function () { fokusNa(cil); } });
+      else fokusNa(cil);
+    } });
+  });
 
   function init() {
     var mm = gsap.matchMedia();
@@ -71,7 +128,7 @@
         var box = h1.closest(".hero-split_component > div, .home-hero_content") || h1.parentElement;
         var okolo = volne(vse(":scope > *", box)).filter(function (el) { return el !== h1 && !el.contains(h1) && el.getBoundingClientRect().top < innerHeight && !el.matches("img, figure, .cms-richtext, .stats_component"); });
         tl.add(revealNadpisu(h1), 0.05);
-        if (okolo.length) tl.from(okolo, { y: 16, autoAlpha: 0, duration: 0.8, stagger: 0.07 }, 0.35);
+        if (okolo.length) tl.from(okolo, bezPrechodu(okolo, { y: 16, autoAlpha: 0, duration: 0.8, stagger: 0.07 }), 0.35);
         oznac([h1]); oznac(okolo);
         oznac(vse(".hero-split_component > div:first-child *, .home-hero_content *"));
       }
@@ -83,7 +140,7 @@
         oznac([img]);
       }
       var chips = vse(".home-hero_figure .hero-chip_component, .hero-split_figure .hero-chip_component");
-      if (chips.length) { tl.from(chips, { y: 14, scale: 0.96, autoAlpha: 0, duration: 0.6, stagger: 0.14 }, 0.7); oznac(chips); }
+      if (chips.length) { tl.from(chips, bezPrechodu(chips, { y: 14, scale: 0.96, autoAlpha: 0, duration: 0.6, stagger: 0.14 }), 0.7); oznac(chips); }
       ukazUvod();
 
       /* Nadpisy sekcí: řádky vyjedou zpoza masky, jakmile k nim čtenář dojede */
@@ -145,7 +202,7 @@
         var t = gsap.timeline({ scrollTrigger: { trigger: el, start: START, once: true }, defaults: { ease: EASE } });
         t.from(el, { y: 32, autoAlpha: 0, duration: 0.9 });
         var vnitrek = volne(vse(":scope > *:not(.bg-layer)", el));
-        if (vnitrek.length > 1) t.from(vnitrek, { y: 16, autoAlpha: 0, duration: 0.7, stagger: 0.08 }, 0.18);
+        if (vnitrek.length > 1) t.from(vnitrek, bezPrechodu(vnitrek, { y: 16, autoAlpha: 0, duration: 0.7, stagger: 0.08 }), 0.18);
         oznac([el]); oznac(vnitrek);
       });
 
@@ -153,7 +210,7 @@
       vse(".section-head_component, .band-split_head, .tile-grid_head, .provoz-head_component, .news-head_component, .duty_lead, .price-split_aside, .radce-split_aside, .ceiling-panel_top, .statement-number_component, .kontakt_content").forEach(function (h) {
         var deti = volne(vse(":scope > *", h));
         if (!deti.length) return;
-        gsap.from(deti, { y: 20, autoAlpha: 0, duration: 0.75, ease: EASE, stagger: 0.08, scrollTrigger: { trigger: h, start: START, once: true } });
+        gsap.from(deti, bezPrechodu(deti, { y: 20, autoAlpha: 0, duration: 0.75, ease: EASE, stagger: 0.08, scrollTrigger: { trigger: h, start: START, once: true } }));
         oznac(deti);
       });
 
@@ -171,7 +228,7 @@
         var deti = volne(vse(":scope > :not(.w-dyn-list), :scope > .w-dyn-list > .w-dyn-items > *", g).map(sBoxem)).filter(function (el) { return !el.classList.contains("tile-grid_head"); });
         if (!deti.length) return;
         var t = gsap.timeline({ scrollTrigger: { trigger: g, start: START, once: true }, defaults: { ease: EASE } });
-        t.from(deti, { y: 24, autoAlpha: 0, duration: 0.7, stagger: Math.min(0.08, 0.5 / deti.length) });
+        t.from(deti, bezPrechodu(deti, { y: 24, autoAlpha: 0, duration: 0.7, stagger: Math.min(0.08, 0.5 / deti.length) }));
         /* jen vykreslené ikony (u karty s fotkou je ikona skrytá přes display: none) */
         var ikony = volne(vse(".tiles_icon, .equip_icon, .duty_icon, .pillars_icon, .icon-list_icon, .nurse-split_icon, .partner_check, .team_note-icon", g)).filter(function (el) { return el.getClientRects().length > 0; });
         oznac(ikony);
@@ -186,7 +243,7 @@
       });
       volne(vse("main .padding-section-small > *, main .padding-section-medium > *, main .padding-section-large > *, main .padding-section-small > * > *, main .padding-section-medium > * > *")).forEach(function (b) {
         if (maOznacene(b) || hotovo.has(b.parentElement) || b.matches(".bg-layer, .zastup-bar_component, .zastup-panel_component, .pohotovost_component, .action-bar_component, [data-mm-zobrazit]")) return;
-        gsap.from(b, { y: 24, autoAlpha: 0, duration: 0.8, ease: EASE, scrollTrigger: { trigger: b, start: START, once: true } });
+        gsap.from(b, bezPrechodu(b, { y: 24, autoAlpha: 0, duration: 0.8, ease: EASE, scrollTrigger: { trigger: b, start: START, once: true } }));
         oznac([b]);
       });
 
@@ -225,5 +282,10 @@
     if (document.readyState === "complete") setTimeout(dorovnej, 350);
     else window.addEventListener("load", function () { setTimeout(dorovnej, 350); }, { once: true });
   }
-  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () { init(); ScrollTrigger.refresh(); kotvaZAdresy(); });
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+    /* chyba v jedné animaci nesmí zastavit zbytek (refresh, příchod s kotvou) */
+    try { init(); } catch (e) { if (window.console) console.error(e); }
+    try { ScrollTrigger.refresh(); } catch (e) { if (window.console) console.error(e); }
+    kotvaZAdresy();
+  });
 })();

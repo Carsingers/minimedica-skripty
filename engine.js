@@ -33,6 +33,9 @@
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
     var m = s.match(/^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$/);
     if (m) return m[3] + "-" + pad(m[2]) + "-" + pad(m[1]);
+    /* Lomítka (vazba ve Webflow omylem D/M/YYYY): web je český, tedy den/měsíc, nikdy přes new Date (ten čte M/D) */
+    var l = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (l) return l[3] + "-" + pad(l[2]) + "-" + pad(l[1]);
     var c = s.match(/^(\d{1,2})\.?\s+([^\s\d.,]+)\s+(\d{4})$/);
     var mes = c && MES_CISLO[c[2].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")];
     if (mes) return c[3] + "-" + pad(mes) + "-" + pad(c[1]);
