@@ -320,21 +320,7 @@
     el.textContent = el.dataset.velke === "true" ? t.charAt(0).toUpperCase() + t.slice(1) : t;
   });
 
-  /* ---------- Vaše ordinace (jen v prohlížeči rodiče, žádná data u nás) ----------
-     Slug stránky ordinace nese kořen hero (Webflow neumí atribut na body), záložně body. */
-  try {
-    var strankaEl = document.querySelector("[data-mm-stranka-ordinace]");
-    var tato = strankaEl ? strankaEl.dataset.mmStrankaOrdinace : document.body.dataset.mmStrankaOrdinace;
-    if (tato) localStorage.setItem("mm-ordinace", tato);
-    var moje = localStorage.getItem("mm-ordinace");
-    vse("[data-mm-razeni]").forEach(function (list) {
-      var karta = moje && list.querySelector('[data-mm-ordinace="' + moje + '"]');
-      if (!karta) return;
-      var polozka = karta.closest("[data-mm-polozka]") || karta;
-      if (polozka.parentNode === list || polozka.parentNode) polozka.parentNode.insertBefore(polozka, polozka.parentNode.firstElementChild);
-      karta.classList.add("is-yours");
-    });
-  } catch (e) { /* localStorage zakázané: výchozí pořadí */ }
+  /* Pořadí karet ordinací je pevné (pole Pořadí v CMS). „Naposledy otevřená“ s přeřazením je od 21. 10. 2026 zrušená. */
 
   /* ---------- Uložit kontakt (vCard) ----------
      data-nazev nese jen Název ordinace (atribut ve Webflow neumí text + pole), „MiniMedica“ doplní engine. */
