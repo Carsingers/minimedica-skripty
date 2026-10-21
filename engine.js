@@ -103,11 +103,12 @@
   }).filter(function (p) { return p.ord && p.den && p.od && p["do"]; });
 
   /* Adresa a telefon zástupu: přednost má Zastupující ordinace (data-zo-*), jinak vlastní pole zástupu (data-adresa, data-tel).
-     Ve Webflow tak stačí navázat obě sady atributů a nepotřebuje se podmíněná viditelnost. */
+     Ve Webflow tak stačí navázat obě sady atributů a nepotřebuje se podmíněná viditelnost.
+     Jméno lékařky (kdo) je nepovinné: zastupuje-li celá ordinace, je „kdo“ její název (zoNazev). */
   var ZASTUPY = vse("[data-mm-zastup]").map(function (el) {
     var d = el.dataset;
     return { el: el, ord: d.ordinace, typ: TYP[String(d.typ || "").toLowerCase()] || "zastup",
-      od: datum(d.od), "do": datum(d["do"]), kdo: d.kdo || "",
+      od: datum(d.od), "do": datum(d["do"]), kdo: d.kdo || "", zoNazev: d.zoNazev || "", zoAdresa: d.zoAdresa || "",
       adresa: d.zoAdresa ? [d.zoNazev, d.zoAdresa].filter(Boolean).join(", ") : (d.adresa || ""),
       tel: d.zoTel || d.tel || "", hodiny: d.hodiny || "", vzkaz: d.vzkaz || "" };
   }).filter(function (z) { return z.ord && z.od && z["do"]; });
@@ -226,9 +227,11 @@
     vse('[data-mm="alert"]', root).forEach(function (alert) {
       ukaz(alert, !!z);
       if (!z) return;
-      text(alert, "alert-title", z.typ === "zastup" ? "Zastupuje " + z.kdo : (z.typ === "zavreno" ? "Zavřeno do " + kratce(z["do"]) : (jeSvatek(DNES) && hodinyZastupu(z) ? "Sváteční provoz" : "Omezený provoz")));
+      /* bez jména lékařky nese titulek název zastupující ordinace a text už jen adresu (údaj se neopakuje) */
+      var kdo = z.kdo || z.zoNazev, kde = z.kdo ? z.adresa : (z.zoAdresa || z.adresa);
+      text(alert, "alert-title", z.typ === "zastup" ? (kdo ? "Zastupuje " + kdo : "Zástup do " + kratce(z["do"])) : (z.typ === "zavreno" ? "Zavřeno do " + kratce(z["do"]) : (jeSvatek(DNES) && hodinyZastupu(z) ? "Sváteční provoz" : "Omezený provoz")));
       var prvniVeta = z.vzkaz ? z.vzkaz.split(/(?<=\.)\s/)[0] : "";
-      text(alert, "alert-text", [z.typ === "zastup" ? z.adresa.replace(/,\s*\d{3}\s?\d{2}\s+[^,]+$/, "") : "", prvniVeta].filter(Boolean).join(". ").replace(/\.\./g, "."));
+      text(alert, "alert-text", [z.typ === "zastup" ? kde.replace(/,\s*\d{3}\s?\d{2}\s+[^,]+$/, "") : "", prvniVeta].filter(Boolean).join(". ").replace(/\.\./g, "."));
     });
 
     /* telefon: během zástupu číslo zastupující ordinace, nikdy mrtvé číslo.
