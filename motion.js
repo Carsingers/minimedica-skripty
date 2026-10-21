@@ -225,7 +225,7 @@
       }
       var SKUPINY =".tiles_component, .tile-grid_component, .level-card_list, .news-card_list, .equip_list, .founder-card_list, .team_list, .contact-card_list, .expand-gallery_component, .home-galerie_component, .pillars_component, .story-list_component, .story-list_side, .faq_list, .position_list, .partner_columns, .ceiling-panel_facts, .duty_list, .icon-list_component, .home-pece_list, .nurse-split_list, .qa-split_list, .provoz-planned_list, .provoz-row_list, .kontakt_list, .hodiny_component, .info-box_list, .info-box_richtext ul, .partner_list, .facts_component, .stats_component, .pojistovny_list, .price-split_component > .price_component, .timeline_component, .home-novinky_component";
       vse(SKUPINY).forEach(function (g) {
-        var deti = volne(vse(":scope > :not(.w-dyn-list), :scope > .w-dyn-list > .w-dyn-items > *", g).map(sBoxem)).filter(function (el) { return !el.classList.contains("tile-grid_head"); });
+        var deti = volne(vse(":scope > :not(.w-dyn-list), :scope > .w-dyn-list > .w-dyn-items > *", g).map(sBoxem)).filter(function (el) { return !el.classList.contains("tile-grid_head") && !el.classList.contains("bg-layer"); }); /* aura (bg-layer) stojí, hýbe se jen obsah */
         if (!deti.length) return;
         var t = gsap.timeline({ scrollTrigger: { trigger: g, start: START, once: true }, defaults: { ease: EASE } });
         t.from(deti, bezPrechodu(deti, { y: 24, autoAlpha: 0, duration: 0.7, stagger: Math.min(0.08, 0.5 / deti.length) }));

@@ -178,4 +178,101 @@
       setTimeout(function () { var f = form.querySelector("input:not([type=hidden])"); if (f) f.focus({ preventScroll: true }); }, 500);
     });
   });
+
+  /* Balíček fotek (HP, Z našich ordinací; vzor 21st.dev „Stacked Card Carousel“). Bez JS vodorovný řádek fotek.
+     ui.js přidá is-stack a skládá karty přes --i (0 = nahoře, hlouběji než HLOUBKA neviditelné). Horní karta odletí
+     tažením (do strany tahu), šipkou nebo klávesou a zařadí se dospod. Popisek = alt horní fotky (ve Webflow alt z Galerie).
+     Čtečka vidí jen horní fotku (jako snímek karuselu), změnu ohlásí popisek (aria-live). */
+  document.querySelectorAll("[data-mm-stack]").forEach(function (st) {
+    var karty = Array.prototype.slice.call(st.querySelectorAll(".photo-stack_item")), n = karty.length;
+    if (n < 2) return;
+    var seznam = st.querySelector(".photo-stack_list"), popis = st.querySelector("[data-mm-stack-popis]"), pocet = st.querySelector("[data-mm-stack-pocet]");
+    var HLOUBKA = 3, akt = 0, jede = false, tah = null;
+    function poloha(k) { return (karty.indexOf(k) - akt + n) % n; }
+    function usad(k) {
+      var i = poloha(k);
+      k.style.setProperty("--i", Math.min(i, HLOUBKA));
+      k.classList.toggle("is-nahore", i === 0);
+      k.classList.toggle("is-skryta", i > HLOUBKA);
+      if (i === 0) k.removeAttribute("aria-hidden"); else k.setAttribute("aria-hidden", "true");
+    }
+    function popisek() {
+      var img = karty[akt].querySelector("img");
+      if (popis) popis.textContent = img ? img.alt : "";
+      if (pocet) pocet.textContent = (akt + 1) + " / " + n;
+    }
+    function rozloz() { karty.forEach(usad); popisek(); }
+    function dalsi(smer) {
+      if (jede) return;
+      var k = karty[akt];
+      akt = (akt + 1) % n;
+      if (klid) { rozloz(); return; }
+      jede = true;
+      k.style.setProperty("--odlet", smer > 0 ? "115%" : "-115%");
+      k.style.setProperty("--odlet-uhel", smer > 0 ? "9deg" : "-9deg");
+      k.classList.remove("is-tazena");
+      k.style.transform = "";
+      k.classList.add("is-pryc");
+      k.setAttribute("aria-hidden", "true");
+      karty.forEach(function (x) { if (x !== k) usad(x); });
+      popisek();
+      setTimeout(function () {
+        /* dospod bez přechodu a neviditelně, pak se (je-li v hloubce) jen rozsvítí */
+        k.classList.add("bez-prechodu", "is-skryta");
+        k.classList.remove("is-pryc", "is-nahore");
+        k.style.setProperty("--i", Math.min(poloha(k), HLOUBKA));
+        void k.offsetWidth;
+        k.classList.remove("bez-prechodu");
+        usad(k);
+        jede = false;
+      }, 430);
+    }
+    function predchozi() {
+      if (jede) return;
+      var k = karty[(akt - 1 + n) % n];
+      akt = (akt - 1 + n) % n;
+      if (klid) { rozloz(); return; }
+      jede = true;
+      /* přiletí zleva na vrch, ostatní se posunou o patro níž */
+      k.style.setProperty("--odlet", "-115%");
+      k.style.setProperty("--odlet-uhel", "-9deg");
+      k.classList.add("bez-prechodu", "is-pryc");
+      k.classList.remove("is-skryta");
+      void k.offsetWidth;
+      k.classList.remove("bez-prechodu");
+      requestAnimationFrame(function () { k.classList.remove("is-pryc"); rozloz(); });
+      setTimeout(function () { jede = false; }, 450);
+    }
+    st.classList.add("is-stack");
+    rozloz();
+    var zpet = st.querySelector("[data-mm-stack-zpet]"), dal = st.querySelector("[data-mm-stack-dal]");
+    if (zpet) zpet.addEventListener("click", predchozi);
+    if (dal) dal.addEventListener("click", function () { dalsi(-1); });
+    st.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight") { e.preventDefault(); dalsi(-1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); predchozi(); }
+    });
+    /* tažení horní karty: svisle se stránka dál posouvá (touch-action: pan-y), vodorovně karta jede za prstem */
+    seznam.addEventListener("pointerdown", function (e) {
+      var k = karty[akt];
+      if (jede || !k.contains(e.target) || (e.pointerType === "mouse" && e.button !== 0)) return;
+      tah = { x: e.clientX, dx: 0, k: k };
+      k.classList.add("is-tazena");
+      if (k.setPointerCapture) k.setPointerCapture(e.pointerId);
+    });
+    seznam.addEventListener("pointermove", function (e) {
+      if (!tah) return;
+      tah.dx = e.clientX - tah.x;
+      tah.k.style.transform = "translate3d(" + tah.dx + "px," + Math.abs(tah.dx) * 0.04 + "px,0) rotate(" + tah.dx / 18 + "deg)";
+    });
+    function pustit() {
+      if (!tah) return;
+      var t = tah; tah = null;
+      if (Math.abs(t.dx) > 70) { dalsi(t.dx > 0 ? 1 : -1); return; }
+      t.k.classList.remove("is-tazena");
+      t.k.style.transform = "";
+    }
+    seznam.addEventListener("pointerup", pustit);
+    seznam.addEventListener("pointercancel", pustit);
+  });
 })();
