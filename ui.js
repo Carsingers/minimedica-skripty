@@ -123,14 +123,15 @@
   /* Mapa a Navigovat z data-adresa, data-lat a data-lng na kořeni mapy (Webflow neumí složit URL z polí).
      Google mapa se ukáže hned (21. 10. 2026, dřív OpenStreetMap až po klepnutí), iframe se načte líně až u sekce.
      Hledá se podle adresy: podle názvu Google všechny ordinace posadí na jediný záznam MiniMedica s.r.o. (Kubišova).
-     Navigovat ve stejné sekci vede na trasu k souřadnicím (vchod), bez nich k adrese; bez obojího zůstane #kontakt a mapa se skryje. */
+     Navigovat ve stejné sekci vede také k adrese, ať mapa a trasa mají jeden zdroj (ukázkové souřadnice v CMS mířily jinam);
+     souřadnice jen jako záloha bez adresy. Bez obojího zůstane #kontakt a mapa se skryje. */
   function souradnice(v) { var n = parseFloat(String(v == null ? "" : v).replace(",", ".")); return isFinite(n) ? n : NaN; }
   document.querySelectorAll("[data-mm-mapa]").forEach(function (m) {
     var lat = souradnice(m.dataset.lat), lng = souradnice(m.dataset.lng), adresa = String(m.dataset.adresa || "").trim();
     var bod = !(isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (!lat && !lng));
     if (!bod && !adresa) { m.classList.add("hide"); return; }
     (m.closest("section") || document).querySelectorAll('[data-mm="navigovat"]').forEach(function (a) {
-      a.href = "https://www.google.com/maps/dir/?api=1&destination=" + (bod ? lat + "," + lng : encodeURIComponent(adresa));
+      a.href = "https://www.google.com/maps/dir/?api=1&destination=" + (adresa ? encodeURIComponent(adresa) : lat + "," + lng);
       a.target = "_blank"; a.rel = "noopener";
     });
     var f = m.querySelector("iframe.kontakt_map-frame");
