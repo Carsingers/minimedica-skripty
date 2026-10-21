@@ -259,14 +259,8 @@
       if (maZnacky(note)) { ukaz(note, !!(z && z.typ === "zastup")); return; }
       note.textContent = n; ukaz(note, !!n);
     });
-    /* pořadí: otevřeno = telefon první, zavřeno = online objednání první (funguje i v noci).
-       Jen první viditelné tlačítko a objednání; bez viditelného objednání (Jen telefonicky) se nic nepřehazuje. */
-    var call = prvniViditelny('[data-mm="call"]', root), order = prvniViditelny('[data-mm="order"]', root);
-    if (call && order && call.parentNode === order.parentNode && order.dataset.online === "true") {
-      var prvni = (r.st === "closed") ? order : call, druhy = prvni === order ? call : order;
-      if (prvni.nextElementSibling !== druhy && prvni !== druhy) call.parentNode.insertBefore(prvni, druhy);
-      prvni.classList.remove("is-line"); druhy.classList.add("is-line");
-    }
+    /* pořadí tlačítek engine nemění (21. 10. 2026): online objednání je vždy hlavní, Zavolat vedle něj druhé
+       (obrys z markupu, ve Webflow embed D1e). Bez online objednání je Zavolat hlavní a druhé e-mail. */
   });
 
   /* ---------- Zástupy jako obsah: běžící / plánované / prošlé ----------
