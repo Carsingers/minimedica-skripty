@@ -456,7 +456,7 @@
     lista.className = "mm-nahled"; lista.setAttribute("role", "status");
     var popis = document.createElement("span");
     var den = DNY[new Date(DNES + "T12:00:00Z").getUTCDay()];
-    popis.innerHTML = "Náhled webu k <strong></strong>";
+    popis.innerHTML = "Náhled webu: <strong></strong>";
     popis.querySelector("strong").textContent = den + " " + dlouze(DNES) + ", " + bezNuly(ted.slice(11, 16));
     var formular = document.createElement("form");
     formular.innerHTML = '<label class="sr-only" for="mm-nahled-cas">Jiné datum a čas</label><input id="mm-nahled-cas" type="datetime-local" required><button type="submit">Zobrazit</button>';
