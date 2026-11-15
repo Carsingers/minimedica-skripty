@@ -432,6 +432,48 @@
     if (h && h !== a.getAttribute("href")) a.setAttribute("href", h);
   });
 
+  /* ---------- Náhled webu k datu (?ted=…) pro správce (v1.0.9, 15. 11. 2026) ----------
+     Jen s parametrem v adrese: lišta nahoře říká, ke kterému dni a času web ukazuje, dá se v ní změnit datum
+     a vrátit se na dnešek. Odkazy v rámci webu si parametr podrží, takže jde proklikat celý web v daný den.
+     Výjimka z pravidla „engine nekreslí“: návštěvník bez parametru lištu nikdy neuvidí, nejde o obsah stránky. */
+  if (test && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(test)) {
+    vse("a[href]").forEach(function (a) {
+      var h = a.getAttribute("href");
+      if (!h || h.charAt(0) === "#" || /^(tel|mailto|javascript):/i.test(h)) return;
+      var u; try { u = new URL(h, location.href); } catch (e) { return; }
+      if (u.origin !== location.origin || u.searchParams.has("ted")) return;
+      u.searchParams.set("ted", test);
+      a.setAttribute("href", u.pathname + u.search + u.hash);
+    });
+    var styl = document.createElement("style");
+    styl.textContent = ".mm-nahled{position:relative;z-index:1000;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.5rem 1rem;padding:.625rem 1rem;background:var(--color--vinova,#643244);color:var(--color--bila,#fff);font:inherit;font-size:.9375rem;line-height:1.4}"
+      + ".mm-nahled strong{font-weight:600}.mm-nahled form{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}"
+      + ".mm-nahled input{font:inherit;font-size:.875rem;padding:.25rem .5rem;border:0;border-radius:.375rem;color:#2A1E24;background:#fff}"
+      + ".mm-nahled button,.mm-nahled a{font:inherit;font-size:.875rem;font-weight:500;color:inherit;background:transparent;border:1px solid rgba(255,255,255,.6);border-radius:999px;padding:.25rem .75rem;cursor:pointer;text-decoration:none}"
+      + ".mm-nahled button:hover,.mm-nahled a:hover{background:rgba(255,255,255,.15)}.mm-nahled :focus-visible{outline:2px solid #fff;outline-offset:2px}";
+    document.head.appendChild(styl);
+    var lista = document.createElement("div");
+    lista.className = "mm-nahled"; lista.setAttribute("role", "status");
+    var popis = document.createElement("span");
+    var den = DNY[new Date(DNES + "T12:00:00Z").getUTCDay()];
+    popis.innerHTML = "Náhled webu k <strong></strong>";
+    popis.querySelector("strong").textContent = den + " " + dlouze(DNES) + ", " + bezNuly(ted.slice(11, 16));
+    var formular = document.createElement("form");
+    formular.innerHTML = '<label class="sr-only" for="mm-nahled-cas">Jiné datum a čas</label><input id="mm-nahled-cas" type="datetime-local" required><button type="submit">Zobrazit</button>';
+    formular.querySelector("input").value = test;
+    formular.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var v = formular.querySelector("input").value;
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return;
+      var u = new URL(location.href); u.searchParams.set("ted", v); location.href = u.pathname + u.search + u.hash;
+    });
+    var zpet = document.createElement("a");
+    var bez = new URL(location.href); bez.searchParams.delete("ted");
+    zpet.href = bez.pathname + bez.search + bez.hash; zpet.textContent = "Zpět na dnešek";
+    lista.appendChild(popis); lista.appendChild(formular); lista.appendChild(zpet);
+    document.body.insertBefore(lista, document.body.firstChild);
+  }
+
   /* k ladění v konzoli (a pro testy) */
   window.MM = { ted: DNES + " " + ted.slice(11), stav: stav, jeSvatek: jeSvatek, velikonocniNedele: velikonocniNedele, datum: datum, telOdkaz: telOdkaz };
 })();
