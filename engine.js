@@ -151,7 +151,9 @@
     r.dnes = bl.length ? bl[0].od + "–" + bl[bl.length - 1]["do"] : (jeSvatek(DNES) ? "Svátek, zavřeno" : "Zavřeno");
     if (z && z.typ === "zastup") {
       r.st = "zastup"; r.text = "Zástup do " + kratce(z["do"]);
-      if (z.hodiny) r.dnes = z.hodiny; /* že jde o zástup, říká jantarový štítek a box, neopakujeme */
+      /* že jde o zástup, říká jantarový štítek a box, neopakujeme. Bez hodin (zástup mimo síť) nikdy vlastní pásma:
+         ordinace je zavřená a hodiny určuje zastupující lékařka (zátěžový test Vánoce 2026). */
+      r.dnes = z.hodiny || "Podle zastupující ordinace";
       return r;
     }
     if (z && z.typ === "zavreno") {
@@ -274,10 +276,90 @@
       planovany = DNES < z.od && z.od <= plusDny(DNES, dni);
     ukaz(el, rezim === "bezi" ? bezi : rezim === "planovany" ? planovany : (bezi || planovany));
   });
-  /* prázdné stavy seznamů zástupů */
+  /* ---------- Zástupy po dnech + svátky (15. 11. 2026, zátěžový test Vánoce) ----------
+     Seznam s data-mm-po-dnech seskupí po dnech: v rámci dne omezený provoz (kdo zastupuje) před zástupy a zavřením,
+     opakované datum skryje třídou is-navazuje, předchozímu řádku dá is-pokracuje (styl dělí jen dny).
+     Státní svátky v okně seznamu doplní jako řádek „Všechny ordinace“ podle vzoru v markupu (data-mm-svatek-vzor="#id seznamu"),
+     jen když by se aspoň v jeden ze dnů jinak ordinovalo. Texty jsou ve vzoru, engine doplní datum a název svátku.
+     Režim „planovane“ (/provoz): okno od zítřka. Režim „nejblizsi“ (pruh na HP): okno od dneška, nechá jen nejbližší den se změnou,
+     ostatní skryje a odkryje odkaz data-mm-dalsi-pro="#id". */
+  var NAZVY_SVATKU = { "01-01": "Nový rok", "05-01": "Svátek práce", "05-08": "Den vítězství", "07-05": "Den Cyrila a Metoděje",
+    "07-06": "Den upálení mistra Jana Husa", "09-28": "Den české státnosti", "10-28": "Den vzniku Československa",
+    "11-17": "Den boje za svobodu a demokracii", "12-24": "Štědrý den", "12-25": "1. svátek vánoční", "12-26": "2. svátek vánoční" };
+  function nazevSvatku(iso) { return NAZVY_SVATKU[iso.slice(5)] || (iso === plusDny(velikonocniNedele(+iso.slice(0, 4)), -2) ? "Velký pátek" : "Velikonoční pondělí"); }
+  function ordinujeSe(iso) {
+    var dow = isoDow(iso);
+    return PASMA.some(function (p) { return p.den === dow && (!p.platiOd || p.platiOd <= iso) && (!p.platiDo || iso <= p.platiDo); });
+  }
+  /* souvislé svátky v okně [od, do]; blok jen když by se v některý jeho den jinak ordinovalo */
+  function svatkyVOkne(od, dO) {
+    var bloky = [], b = null;
+    for (var d = od; d <= dO; d = plusDny(d, 1)) {
+      if (!jeSvatek(d)) { b = null; continue; }
+      if (b) b["do"] = d; else { b = { od: d, "do": d }; bloky.push(b); }
+    }
+    return bloky.filter(function (x) {
+      for (var d = x.od; d <= x["do"]; d = plusDny(d, 1)) if (ordinujeSe(d)) return true;
+      return false;
+    });
+  }
+  function nazevBloku(b) {
+    if (b.od === b["do"]) return nazevSvatku(b.od);
+    if (b.od.slice(5) === "12-24" && b["do"].slice(5) === "12-26") return "Vánoční svátky";
+    var n = []; for (var d = b.od; d <= b["do"]; d = plusDny(d, 1)) n.push(nazevSvatku(d));
+    return n.join(", ");
+  }
+  function rozsahKratce(od, dO) { return kratce(od) + (dO !== od ? "–" + kratce(dO) : ""); }
+  var PORADI_TYPU = { svatek: 0, omezeny: 1, zastup: 2, zavreno: 3 };
+  vse("[data-mm-po-dnech]").forEach(function (seznam) {
+    var rezim = seznam.dataset.mmPoDnech, id = "#" + seznam.id;
+    var radky = vse("[data-mm-zobrazit]", seznam).map(function (el) {
+      var od = datum(el.dataset.od), dO = datum(el.dataset["do"]);
+      return { el: el, obal: el.closest(".w-dyn-item") || el, od: od, "do": dO,
+        typ: TYP[String(el.dataset.typ || "").toLowerCase()] || "zastup", vidim: !el.classList.contains("hide") };
+    }).filter(function (r) { return r.od && r["do"]; });
+    /* okno seznamu: „planovany“ od zítřka, jinak od dneška; délka z prvního řádku nebo seznamu (data-mm-dni) */
+    var dni = +(seznam.dataset.mmDni || (radky[0] && radky[0].el.dataset.mmDni) || 60);
+    var zacatek = rezim === "planovane" ? plusDny(DNES, 1) : DNES, konec = plusDny(DNES, dni);
+    var vzor = document.querySelector('[data-mm-svatek-vzor="' + id + '"]');
+    var rodic = radky.length ? radky[0].obal.parentNode : seznam;
+    var svatky = vzor ? svatkyVOkne(zacatek, konec) : [];
+    svatky.forEach(function (b) {
+      var k = vzor.cloneNode(true);
+      k.removeAttribute("data-mm-svatek-vzor"); k.removeAttribute("id");
+      k.setAttribute("data-mm-svatek-den", b.od); k.setAttribute("data-od", b.od); k.setAttribute("data-do", b["do"]);
+      vse("[data-mm-svatek-datum]", k).forEach(function (x) { x.textContent = rozsahKratce(b.od, b["do"]); });
+      vse("[data-mm-svatek-nazev]", k).forEach(function (x) { x.textContent = nazevBloku(b); });
+      ukaz(k, true);
+      rodic.appendChild(k);
+      radky.push({ el: k, obal: k, od: b.od, "do": b["do"], typ: "svatek", vidim: true });
+    });
+    var viditelne = radky.filter(function (r) { return r.vidim; });
+    /* den, od kterého řádek platí (běžící zástup = dnes) */
+    viditelne.forEach(function (r) { r.den = r.od < DNES ? DNES : r.od; });
+    viditelne.sort(function (a, b) { return a.den < b.den ? -1 : a.den > b.den ? 1 : PORADI_TYPU[a.typ] - PORADI_TYPU[b.typ]; });
+    if (rezim === "nejblizsi" && viditelne.length) {
+      var den = viditelne[0].den, skryte = 0;
+      viditelne = viditelne.filter(function (r) {
+        var dnes = r.od <= den && den <= r["do"];
+        if (!dnes) { ukaz(r.el, false); skryte++; }
+        return dnes;
+      });
+      vse('[data-mm-dalsi-pro="' + id + '"]').forEach(function (d) { ukaz(d, skryte > 0); });
+    }
+    /* pořadí v DOM podle dne a typu, opakované datum navazuje na předchozí řádek */
+    viditelne.forEach(function (r, i) {
+      rodic.appendChild(r.obal);
+      var stejny = i > 0 && viditelne[i - 1].od === r.od && viditelne[i - 1]["do"] === r["do"];
+      r.el.classList.toggle("is-navazuje", stejny);
+      if (stejny) viditelne[i - 1].el.classList.add("is-pokracuje");
+    });
+  });
+
+  /* prázdné stavy seznamů zástupů (svátek doplněný enginem se počítá) */
   vse("[data-mm-prazdne-pro]").forEach(function (empty) {
     var list = document.querySelector(empty.dataset.mmPrazdnePro);
-    ukaz(empty, !list || !vse("[data-mm-zobrazit]:not(.hide)", list).length);
+    ukaz(empty, !list || !vse("[data-mm-zobrazit]:not(.hide), [data-mm-svatek-den]:not(.hide)", list).length);
   });
 
   /* ---------- „Platí do“ (aktuality, pozice, oznámení) ---------- */
