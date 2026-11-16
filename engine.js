@@ -385,6 +385,33 @@
     });
     if (polozky.length) row.classList.toggle("is-zavreno", !polozky.some(function (it) { return viditelny(it, row); }));
   });
+  /* Změny v nejbližších 7 dnech přímo v tabulce (v1.0.11, 16. 11. 2026): tabulka ukazuje běžné hodiny, ale den, kdy platí něco jiného
+     (svátek, zástup, zavřeno, omezený provoz), dostane is-zmena a poznámku s datem („24. 12.: Štědrý den, zavřeno“), běžná pásma ztlumí CSS.
+     Jinak by 24. 12. stálo u „Dnes“ čtvrtek s běžnými hodinami a karta nahoře by tvrdila zavřeno. Ordinaci bere z data-mm-ordinace
+     tabulky, jinak z první ordinace na stránce (šablona). Bez JS zůstane věta „Ve státní svátky je zavřeno.“ */
+  vse('[data-mm="hodiny"]').forEach(function (tab) {
+    var koren = tab.closest("[data-mm-ordinace]") || document.querySelector("[data-mm-ordinace]");
+    var ord = tab.dataset.mmOrdinace || (koren && koren.dataset.mmOrdinace);
+    if (!ord) return;
+    vse("[data-mm-den]", tab).forEach(function (row) {
+      var iso = plusDny(DNES, (+row.dataset.mmDen - DOW + 7) % 7), z = zastupNaDen(ord, iso), sv = jeSvatek(iso), h = hodinyZastupu(z), t = "";
+      var rozsah = h ? bezNuly(h[0].od) + "–" + bezNuly(h[0]["do"]) : "";
+      if (z && z.typ === "zastup") t = "zastupuje " + (z.kdo || (z.zoNazev ? "ordinace " + z.zoNazev : "jiná ordinace")) + (rozsah ? ", " + rozsah : "");
+      else if (z && z.typ === "zavreno") t = sv ? nazevSvatku(iso) + ", zavřeno" : "zavřeno";
+      else if (z && h) t = (sv ? "sváteční provoz " : "omezený provoz ") + rozsah;
+      else if (sv && PASMA.some(function (x) { return x.ord === ord && x.den === isoDow(iso) && (!x.platiOd || x.platiOd <= iso) && (!x.platiDo || iso <= x.platiDo); })) t = nazevSvatku(iso) + ", zavřeno";
+      vse(".hodiny_zmena", row).forEach(function (el) { el.remove(); });
+      row.classList.toggle("is-zmena", !!t);
+      if (!t) return;
+      var p = document.createElement("p");
+      p.className = "hodiny_zmena";
+      p.innerHTML = "<strong></strong> ";
+      p.firstChild.textContent = kratce(iso) + ":";
+      p.appendChild(document.createTextNode(t));
+      var cil = row.children[1] || row;
+      cil.insertBefore(p, cil.firstChild);
+    });
+  });
 
   /* ---------- Co s sebou: Rich text nedovolí role na ul a list-style: none v Safari bere seznamu sémantiku ---------- */
   vse(".info-box_richtext ul").forEach(function (ul) { ul.setAttribute("role", "list"); });

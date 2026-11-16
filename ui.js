@@ -274,4 +274,59 @@
     seznam.addEventListener("pointerup", pustit);
     seznam.addEventListener("pointercancel", pustit);
   });
+  /* ---------- Pruh oznámení na HP jako jeden běžící řádek (v1.0.7, 16. 11. 2026) ----------
+     section_oznameni[data-mm-pruh]: viditelná oznámení (síť, zástupy a svátky nejbližšího dne, které už rozhodl engine) přesune do jednoho řádku.
+     Vejde-li se, stojí uprostřed; jinak jede dokola (pás zdvojený, kopie aria-hidden a inert), zastaví se pod myší, při fokusu a po klepnutí.
+     Vpravo „Všechny změny“ (odkaz z data-mm-dalsi-pro, i s ?ted) a křížek. Zavřený pruh si prohlížeč pamatuje, dokud se text nezmění
+     (v náhledu ?ted se nepamatuje). Omezený pohyb: nejede, řádek jde posunout prstem. Bez JS zůstanou oznámení pod sebou. */
+  document.querySelectorAll("[data-mm-pruh]").forEach(function (sekce) {
+    var polozky = Array.prototype.filter.call(sekce.querySelectorAll(".oznameni_component"), function (el) {
+      return !el.classList.contains("is-dalsi") && !el.hasAttribute("data-mm-svatek-vzor") && el.offsetParent !== null && el.textContent.trim();
+    });
+    if (!polozky.length) return;
+    var zmeny = polozky.some(function (el) { return el.closest("[data-mm-po-dnech]"); });
+    var dalsi = sekce.querySelector("[data-mm-dalsi-pro] a");
+    var podpis = polozky.map(function (el) { return el.textContent.replace(/\s+/g, " ").trim(); }).join(" | ");
+    var nahled = /[?&]ted=/.test(location.search), KLIC = "mm-pruh-skryto";
+    try { if (!nahled && localStorage.getItem(KLIC) === podpis) { sekce.classList.add("hide"); return; } } catch (e) {}
+
+    var obal = document.createElement("div"); obal.className = "padding-global";
+    obal.innerHTML = '<div class="container-large"><div class="pruh_component" role="region" aria-label="Oznámení a změny provozu">' +
+      '<div class="pruh_okno"><div class="pruh_pas"><div class="pruh_sada"></div></div></div>' +
+      (zmeny ? '<a class="pruh_odkaz"></a>' : "") +
+      '<button type="button" class="pruh_zavrit" aria-label="Skrýt oznámení"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg></button></div></div>';
+    var komp = obal.querySelector(".pruh_component"), okno = obal.querySelector(".pruh_okno"), pas = obal.querySelector(".pruh_pas"), sada = obal.querySelector(".pruh_sada");
+    polozky.forEach(function (el) { sada.appendChild(el); });
+    var odkaz = obal.querySelector(".pruh_odkaz");
+    if (odkaz) { odkaz.href = dalsi ? dalsi.getAttribute("href") : "/provoz#planovane"; odkaz.textContent = "Všechny změny"; }
+    sekce.querySelectorAll("[data-mm-dalsi-pro]").forEach(function (d) { d.classList.add("hide"); });
+    sekce.appendChild(obal);
+    sekce.classList.add("is-pruh");
+
+    var klidne = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    function rozjet() {
+      var kopie = pas.querySelector(".pruh_sada.is-kopie");
+      if (kopie) kopie.remove();
+      komp.classList.remove("is-bezi");
+      if (klidne || sada.scrollWidth <= okno.clientWidth + 1) return;
+      kopie = sada.cloneNode(true);
+      kopie.classList.add("is-kopie"); kopie.setAttribute("aria-hidden", "true"); kopie.setAttribute("inert", "");
+      kopie.querySelectorAll("a, button").forEach(function (a) { a.setAttribute("tabindex", "-1"); });
+      pas.appendChild(kopie);
+      komp.style.setProperty("--pruh-trvani", Math.max(12, Math.round(sada.scrollWidth / 45)) + "s");
+      komp.classList.add("is-bezi");
+    }
+    rozjet();
+    var sirka = window.innerWidth, cekani;
+    window.addEventListener("resize", function () {
+      if (window.innerWidth === sirka) return; sirka = window.innerWidth;
+      clearTimeout(cekani); cekani = setTimeout(rozjet, 200);
+    });
+    okno.addEventListener("pointerdown", function (e) { if (e.pointerType !== "mouse") komp.classList.toggle("is-pauza"); });
+    obal.querySelector(".pruh_zavrit").addEventListener("click", function () {
+      sekce.classList.add("hide");
+      try { if (!nahled) localStorage.setItem(KLIC, podpis); } catch (e) {}
+      var m = document.querySelector("main"); if (m) { if (!m.hasAttribute("tabindex")) m.setAttribute("tabindex", "-1"); m.focus({ preventScroll: true }); }
+    });
+  });
 })();
