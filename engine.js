@@ -399,10 +399,11 @@
     if (!n.length) return;
     var v = document.createElement("span");
     v.className = "mm-zastupuje-i";
-    v.textContent = "Zastupujeme i " + vycet(n) + ". ";
-    var hodiny = vse(":scope > [data-mm-prazdne]", blok)[0];
-    if (hodiny) hodiny.parentNode.insertBefore(v, hodiny.nextSibling);
-    else { blok.appendChild(document.createTextNode(" ")); blok.appendChild(v); }
+    v.textContent = " Zastupujeme i " + vycet(n) + ". ";
+    /* za hodiny (a za tečku, když je ve Webflow samostatný span), jinak na konec věty */
+    var za = vse(":scope > [data-mm-prazdne]", blok)[0];
+    if (za && za.nextElementSibling && za.nextElementSibling.textContent.trim() === ".") za = za.nextElementSibling;
+    if (za) za.parentNode.insertBefore(v, za.nextSibling); else blok.appendChild(v);
   });
 
   /* ---------- Hodiny: zvýraznit dnešek ---------- */
