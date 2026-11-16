@@ -8,8 +8,13 @@
    texty a odkazy se nastavují všem prvkům, pořadí tlačítek se řídí jen tím viditelným.
 
    Testování: ?ted=2026-12-24T10:00 přepne „teď“ (pražský čas).
-   Kontrakt atributů: web/README.md, sekce Engine. */
-(function () {
+   Kontrakt atributů: web/README.md, sekce Engine.
+
+   Jako modul (panel /sprava, testy v Node): soubor jde načíst i bez DOM (import "./engine.js").
+   Bez `document` (nebo s globalThis.MMEngineBezDekorace) nic nedekoruje, jen vystaví jádro na globalThis.MMEngine: vytvor({ pasma, zastupy, ted })
+   počítá stav ze záznamů ve tvaru data atributů skrytých listů a vrací i texty, které z něj ukáže karta.
+   Web běží nad stejným jádrem s daty z DOM, takže panel a web se nerozejdou (sprava-panel.md, princip 3). */
+(function (koren) {
   "use strict";
 
   /* ---------- Čas v Praze, ne v prohlížeči ---------- */
@@ -17,12 +22,12 @@
   function toMin(s) { return (+s.slice(0, 2)) * 60 + (+s.slice(3, 5)); }
   function plusDny(iso, n) { var d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
   function isoDow(iso) { var d = new Date(iso + "T12:00:00Z").getUTCDay(); return d === 0 ? 7 : d; }
-
-  var test = new URLSearchParams(location.search).get("ted");
-  var ted = (test && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(test))
-    ? test.replace("T", " ")
-    : new Date().toLocaleString("sv-SE", { timeZone: "Europe/Prague" }).slice(0, 16);
-  var DNES = ted.slice(0, 10), MIN = toMin(ted.slice(11, 16)), DOW = isoDow(DNES);
+  /* „teď“ jako „YYYY-MM-DD HH:MM“: z přepínače ve tvaru 2026-12-24T10:00, jinak pražský čas */
+  function tedZ(test) {
+    return (test && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(test))
+      ? test.replace("T", " ")
+      : new Date().toLocaleString("sv-SE", { timeZone: "Europe/Prague" }).slice(0, 16);
+  }
 
   /* Webflow vypisuje datum podle zvoleného formátu. Bereme ISO, „15. 10. 2026“, „15.10.2026“,
      český „15. října 2026“ (i 1. pád „15. říjen 2026“, i bez tečky) a výchozí anglický „October 15, 2026“. Nečitelné vrátí "". */
@@ -69,13 +74,8 @@
   function vCas(c) { var h = +c.slice(0, 2); return ([2, 3, 4, 12, 13, 14, 20, 22, 23].indexOf(h) > -1 ? "ve " : "v ") + bezNuly(c); }
   function kratce(iso) { return (+iso.slice(8, 10)) + ". " + (+iso.slice(5, 7)) + "."; }
   function dlouze(iso) { return (+iso.slice(8, 10)) + ". " + MES[+iso.slice(5, 7) - 1] + " " + iso.slice(0, 4); }
-  function kdy(iso) {
-    var i = Math.round((new Date(iso + "T12:00:00Z") - new Date(DNES + "T12:00:00Z")) / 864e5);
-    if (i === 0) return "dnes";
-    if (i === 1) return "zítra";
-    var d = new Date(iso + "T12:00:00Z").getUTCDay();
-    return i < 7 ? DNY_V[d] : DNY_V[d] + " " + kratce(iso);
-  }
+  /* adresa bez PSČ a města: „Kubišova 1291/7, 674 01 Třebíč“ → „Kubišova 1291/7“ */
+  function ulice(a) { return String(a || "").replace(/,\s*\d{3}\s?\d{2}\s+[^,]+$/, ""); }
 
   /* ---------- Telefon ----------
      Pole typu Phone vypisují číslo tak, jak je v CMS („568 842 358“, „+420 568 842 358“), Link › Phone stejně do href.
@@ -89,92 +89,244 @@
   /* text čísla: devět číslic po trojicích („568 842 358“), cokoli jiného tak, jak je */
   function telText(s) { var c = cisloTel(s); return /^\d{9}$/.test(c) ? c.replace(/(\d{3})(?=\d)/g, "$1 ") : String(s || "").trim(); }
 
-  /* ---------- Data z markupu ---------- */
-  function vse(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
-  /* Značky podmínek čte jen CSS (:has). Prvek, který nějakou obsahuje, engine nepřepisuje. */
-  var ZNACKY = "[data-mm-pole], [data-mm-podminky], [data-mm-kdyz-plne], [data-mm-kdyz-prazdne]";
-  function maZnacky(el) { return !!el.querySelector(ZNACKY); }
-  function napis(el, t) { if (!maZnacky(el)) el.textContent = t; }
+  /* ---------- Data ve tvaru data atributů skrytých listů (komponenta cms-data) ----------
+     Pásmo: ordinace (slug), den, od, do, platiOd, platiDo.
+     Zástup: ordinace, typ, od, do, kdo, hodiny, vzkaz, zoNazev, zoAdresa, zoTel (Název, Adresa a Telefon z reference
+     Zastupující ordinace) a adresa, tel (vlastní pole zástupu). Navíc nazev (Ordinace › Název) a zoSlug (Zastupující ordinace › Slug):
+     z nich se pozná, koho zastupující ordinace ten den zastupuje (16. 11. 2026). Přednost má Zastupující ordinace, jinak vlastní pole.
+     Ve Webflow tak stačí navázat obě sady atributů a nepotřebuje se podmíněná viditelnost. */
   var TYP = { "zástup": "zastup", "zastup": "zastup", "zavřeno bez zástupu": "zavreno", "zavreno": "zavreno", "omezený provoz": "omezeny", "omezeny": "omezeny" };
-
-  var PASMA = vse("[data-mm-pasmo]").map(function (el) {
-    return { ord: el.dataset.ordinace, den: +el.dataset.den, od: cas(el.dataset.od), "do": cas(el.dataset["do"]),
-      platiOd: datum(el.dataset.platiOd), platiDo: datum(el.dataset.platiDo) };
-  }).filter(function (p) { return p.ord && p.den && p.od && p["do"]; });
-
-  /* Adresa a telefon zástupu: přednost má Zastupující ordinace (data-zo-*), jinak vlastní pole zástupu (data-adresa, data-tel).
-     Ve Webflow tak stačí navázat obě sady atributů a nepotřebuje se podmíněná viditelnost.
-     Jméno lékařky (kdo) je nepovinné: zastupuje-li celá ordinace, je „kdo“ její název (zoNazev). */
-  var ZASTUPY = vse("[data-mm-zastup]").map(function (el) {
-    var d = el.dataset;
-    return { el: el, ord: d.ordinace, typ: TYP[String(d.typ || "").toLowerCase()] || "zastup",
-      od: datum(d.od), "do": datum(d["do"]), kdo: d.kdo || "", nazev: d.nazev || "", zoSlug: d.zoSlug || "", zoNazev: d.zoNazev || "", zoAdresa: d.zoAdresa || "",
+  function pasmoZDat(d) {
+    return { ord: d.ordinace, den: +d.den, od: cas(d.od), "do": cas(d["do"]), platiOd: datum(d.platiOd), platiDo: datum(d.platiDo) };
+  }
+  function zastupZDat(d) {
+    return { el: d.el, ord: d.ordinace, typ: TYP[String(d.typ || "").toLowerCase()] || "zastup",
+      od: datum(d.od), "do": datum(d["do"]), kdo: d.kdo || "", nazev: d.nazev || "", zoSlug: d.zoSlug || "", zoAdresa: d.zoAdresa || "",
       adresa: d.zoAdresa ? [d.zoNazev, d.zoAdresa].filter(Boolean).join(", ") : (d.adresa || ""),
-      tel: d.zoTel || d.tel || "", hodiny: d.hodiny || "", vzkaz: d.vzkaz || "" };
-  }).filter(function (z) { return z.ord && z.od && z["do"]; });
+      tel: d.zoTel || d.tel || "", hodiny: d.hodiny || "", vzkaz: d.vzkaz || "", zoNazev: d.zoNazev || "" };
+  }
 
-  /* ---------- Výpočet ---------- */
-  function pasmaDne(ord, iso) {
-    if (jeSvatek(iso)) return [];
-    var dow = isoDow(iso);
-    return PASMA.filter(function (p) {
-      return p.ord === ord && p.den === dow && (!p.platiOd || p.platiOd <= iso) && (!p.platiDo || iso <= p.platiDo);
-    }).sort(function (a, b) { return toMin(a.od) - toMin(b.od); });
-  }
-  function zastupNaDen(ord, iso) {
-    return ZASTUPY.filter(function (z) { return z.ord === ord && z.od <= iso && iso <= z["do"]; })[0];
-  }
   /* Omezený provoz s hodinami („09:00–12:00“) nahradí běžná pásma a přebije i svátek (sváteční provoz).
      Bez hodin platí běžná pásma, ve svátek tedy zavřeno. */
   function hodinyZastupu(z) {
     var m = z && String(z.hodiny || "").match(/(\d{1,2}[:.]\d{2})\s*[–-]\s*(\d{1,2}[:.]\d{2})/);
     return m && cas(m[1]) < cas(m[2]) ? [{ od: cas(m[1]), "do": cas(m[2]) }] : null;
   }
-  function blokyDne(ord, iso) {
-    var z = zastupNaDen(ord, iso);
-    return (z && z.typ === "omezeny" && hodinyZastupu(z)) || pasmaDne(ord, iso);
+
+  /* Kdo zastupuje (titulek boxu na kartě): jméno lékařky, bez něj zastupující ordinace ze sítě („MiniMedica Borovina“). */
+  function kdoZastupuje(z) {
+    if (z && z.kdo) return z.kdo;
+    var n = z && z.zoNazev ? String(z.zoNazev) : "";
+    return n ? (/^MiniMedica\b/i.test(n) ? n : "MiniMedica " + n) : "";
   }
-  function dalsiOtevreni(ord) {
-    for (var i = 0; i <= 31; i++) {
-      var iso = plusDny(DNES, i), z = zastupNaDen(ord, iso);
-      if (z && z.typ !== "omezeny") continue;
-      var bl = blokyDne(ord, iso);
-      if (i === 0) bl = bl.filter(function (b) { return toMin(b.od) > MIN; });
-      if (bl.length) return { iso: iso, od: bl[0].od };
-    }
-    return null;
+
+  /* ---------- Názvy svátků (15. 11. 2026, zátěžový test Vánoce) ---------- */
+  var NAZVY_SVATKU = { "01-01": "Nový rok", "05-01": "Svátek práce", "05-08": "Den vítězství", "07-05": "Den Cyrila a Metoděje",
+    "07-06": "Den upálení mistra Jana Husa", "09-28": "Den české státnosti", "10-28": "Den vzniku Československa",
+    "11-17": "Den boje za svobodu a demokracii", "12-24": "Štědrý den", "12-25": "1. svátek vánoční", "12-26": "2. svátek vánoční" };
+  function nazevSvatku(iso) { return NAZVY_SVATKU[iso.slice(5)] || (iso === plusDny(velikonocniNedele(+iso.slice(0, 4)), -2) ? "Velký pátek" : "Velikonoční pondělí"); }
+  function nazevBloku(b) {
+    if (b.od === b["do"]) return nazevSvatku(b.od);
+    if (b.od.slice(5) === "12-24" && b["do"].slice(5) === "12-26") return "Vánoční svátky";
+    var n = []; for (var d = b.od; d <= b["do"]; d = plusDny(d, 1)) n.push(nazevSvatku(d));
+    return n.join(", ");
   }
-  /* Obálka (první Od → poslední Do) řídí štítek, bloky řídí zobrazení. Oboje ze stejných dat. */
-  function stav(ord) {
-    var z = zastupNaDen(ord, DNES), bl = blokyDne(ord, DNES), r = { z: z, bloky: bl, dalsi: null };
-    var uvnitr = bl.length && MIN >= toMin(bl[0].od) && MIN < toMin(bl[bl.length - 1]["do"]);
-    r.dnes = bl.length ? bl[0].od + "–" + bl[bl.length - 1]["do"] : (jeSvatek(DNES) ? "Svátek, zavřeno" : "Zavřeno");
-    if (z && z.typ === "zastup") {
-      r.st = "zastup"; r.text = "Zástup do " + kratce(z["do"]);
-      /* že jde o zástup, říká jantarový štítek a box, neopakujeme. Bez hodin (zástup mimo síť) nikdy vlastní pásma:
-         ordinace je zavřená a hodiny určuje zastupující lékařka (zátěžový test Vánoce 2026). */
-      r.dnes = z.hodiny || "Podle zastupující ordinace";
-      return r;
+  function rozsahKratce(od, dO) { return kratce(od) + (dO !== od ? "–" + kratce(dO) : ""); }
+  /* „ordinaci Hájek“, „ordinace Borovina a Horka-Domky“ */
+  function vycet(n) { return (n.length > 1 ? "ordinace " + n.slice(0, -1).join(", ") + " a " + n[n.length - 1] : "ordinaci " + n[0]); }
+
+  /* ---------- Výpočet ----------
+     vytvor({ pasma, zastupy, ted }): pásma a zástupy jako záznamy data atributů (viz výše), ted ve tvaru přepínače
+     („2026-12-24T10:00“, jinak pražský čas). Vrací stav ordinací k tomu okamžiku a texty, které z něj ukáže karta. */
+  function vytvor(moznosti) {
+    moznosti = moznosti || {};
+    var ted = tedZ(moznosti.ted);
+    var DNES = ted.slice(0, 10), MIN = toMin(ted.slice(11, 16)), DOW = isoDow(DNES);
+    var PASMA = (moznosti.pasma || []).map(pasmoZDat).filter(function (p) { return p.ord && p.den && p.od && p["do"]; });
+    var ZASTUPY = (moznosti.zastupy || []).map(zastupZDat).filter(function (z) { return z.ord && z.od && z["do"]; });
+
+    function kdy(iso) {
+      var i = Math.round((new Date(iso + "T12:00:00Z") - new Date(DNES + "T12:00:00Z")) / 864e5);
+      if (i === 0) return "dnes";
+      if (i === 1) return "zítra";
+      var d = new Date(iso + "T12:00:00Z").getUTCDay();
+      return i < 7 ? DNY_V[d] : DNY_V[d] + " " + kratce(iso);
     }
-    if (z && z.typ === "zavreno") {
+    function pasmaDne(ord, iso) {
+      if (jeSvatek(iso)) return [];
+      var dow = isoDow(iso);
+      return PASMA.filter(function (p) {
+        return p.ord === ord && p.den === dow && (!p.platiOd || p.platiOd <= iso) && (!p.platiDo || iso <= p.platiDo);
+      }).sort(function (a, b) { return toMin(a.od) - toMin(b.od); });
+    }
+    function zastupNaDen(ord, iso) {
+      return ZASTUPY.filter(function (z) { return z.ord === ord && z.od <= iso && iso <= z["do"]; })[0];
+    }
+    /* Ordinace bez jakýchkoli dat (žádné pásmo ani zástup, např. stránka 404 bez cms-data): kořen na webu zůstane
+       bez dekorace, platí neutrální text z markupu („Hodiny v detailu“). Jinak by engine tvrdil „Zavřeno“. */
+    function maData(ord) {
+      return PASMA.some(function (p) { return p.ord === ord; }) || ZASTUPY.some(function (z) { return z.ord === ord; });
+    }
+    /* ordinuje se ten den podle běžných pásem (jedna ordinace, nebo kterákoli, když ord chybí) */
+    function ordinujeSe(iso, ord) {
+      var dow = isoDow(iso);
+      return PASMA.some(function (p) { return (!ord || p.ord === ord) && p.den === dow && (!p.platiOd || p.platiOd <= iso) && (!p.platiDo || iso <= p.platiDo); });
+    }
+    /* souvislé svátky v okně [od, do]; blok jen když by se v některý jeho den jinak ordinovalo */
+    function svatkyVOkne(od, dO) {
+      var bloky = [], b = null;
+      for (var d = od; d <= dO; d = plusDny(d, 1)) {
+        if (!jeSvatek(d)) { b = null; continue; }
+        if (b) b["do"] = d; else { b = { od: d, "do": d }; bloky.push(b); }
+      }
+      return bloky.filter(function (x) {
+        for (var d = x.od; d <= x["do"]; d = plusDny(d, 1)) if (ordinujeSe(d)) return true;
+        return false;
+      });
+    }
+    /* koho ordinace v období zastupuje (názvy zastoupených ordinací; zastupující má ten den vlastní omezený provoz) */
+    function zastupuje(ord, od, dO) {
+      var n = [];
+      ZASTUPY.forEach(function (z) {
+        if (z.typ === "zastup" && z.zoSlug === ord && z.nazev && z.od <= dO && od <= z["do"] && n.indexOf(z.nazev) < 0) n.push(z.nazev);
+      });
+      return n;
+    }
+    /* Změna proti běžným hodinám v den iso (tabulka hodin na detailu, kalendář v panelu). Bez změny null.
+       typ: zastup · zavreno · omezeny · svatecni · svatek; text bez data („Štědrý den, zavřeno“, „omezený provoz 8:00–11:00, zastupuje i ordinaci Hájek“). */
+    function zmenaDne(ord, iso) {
+      var z = zastupNaDen(ord, iso), sv = jeSvatek(iso), h = hodinyZastupu(z);
+      var rozsah = h ? bezNuly(h[0].od) + "–" + bezNuly(h[0]["do"]) : "";
+      if (z && z.typ === "zastup") return { typ: "zastup", text: "zastupuje " + (z.kdo || (z.zoNazev ? "ordinace " + z.zoNazev : "jiná ordinace")) + (rozsah ? ", " + rozsah : ""), z: z };
+      if (z && z.typ === "zavreno") return { typ: "zavreno", text: sv ? nazevSvatku(iso) + ", zavřeno" : "zavřeno", z: z };
+      if (z && h) {
+        var n = zastupuje(ord, iso, iso);
+        return { typ: sv ? "svatecni" : "omezeny", text: (sv ? "sváteční provoz " : "omezený provoz ") + rozsah + (n.length ? ", zastupuje i " + vycet(n) : ""), z: z };
+      }
+      if (sv && ordinujeSe(iso, ord)) return { typ: "svatek", text: nazevSvatku(iso) + ", zavřeno", z: null };
+      return null;
+    }
+    function blokyDne(ord, iso) {
+      var z = zastupNaDen(ord, iso);
+      return (z && z.typ === "omezeny" && hodinyZastupu(z)) || pasmaDne(ord, iso);
+    }
+    function dalsiOtevreni(ord) {
+      for (var i = 0; i <= 31; i++) {
+        var iso = plusDny(DNES, i), z = zastupNaDen(ord, iso);
+        if (z && z.typ !== "omezeny") continue;
+        var bl = blokyDne(ord, iso);
+        if (i === 0) bl = bl.filter(function (b) { return toMin(b.od) > MIN; });
+        if (bl.length) return { iso: iso, od: bl[0].od };
+      }
+      return null;
+    }
+    /* Obálka (první Od → poslední Do) řídí štítek, bloky řídí zobrazení. Oboje ze stejných dat. */
+    function stav(ord) {
+      var z = zastupNaDen(ord, DNES), bl = blokyDne(ord, DNES), r = { z: z, bloky: bl, dalsi: null };
+      var uvnitr = bl.length && MIN >= toMin(bl[0].od) && MIN < toMin(bl[bl.length - 1]["do"]);
+      r.dnes = bl.length ? bl[0].od + "–" + bl[bl.length - 1]["do"] : (jeSvatek(DNES) ? "Svátek, zavřeno" : "Zavřeno");
+      if (z && z.typ === "zastup") {
+        r.st = "zastup"; r.text = "Zástup do " + kratce(z["do"]);
+        /* že jde o zástup, říká jantarový štítek a box, neopakujeme. Bez hodin (zástup mimo síť) nikdy vlastní pásma:
+           ordinace je zavřená a hodiny určuje zastupující lékařka (zátěžový test Vánoce 2026). */
+        r.dnes = z.hodiny || "Podle zastupující ordinace";
+        return r;
+      }
+      if (z && z.typ === "zavreno") {
+        r.st = "closed"; r.dalsi = dalsiOtevreni(ord);
+        r.text = z["do"] === DNES ? "Dnes zavřeno" : "Zavřeno do " + kratce(z["do"]);
+        r.dnes = "Zavřeno";
+        return r;
+      }
+      if (uvnitr) {
+        r.st = z ? "zastup" : "open";
+        r.text = (z ? (jeSvatek(DNES) ? "Sváteční provoz do " : "Omezený provoz, do ") : "Otevřeno do ") + bezNuly(bl[bl.length - 1]["do"]);
+        return r;
+      }
       r.st = "closed"; r.dalsi = dalsiOtevreni(ord);
-      r.text = z["do"] === DNES ? "Dnes zavřeno" : "Zavřeno do " + kratce(z["do"]);
-      r.dnes = "Zavřeno";
+      var pred = jeSvatek(DNES) ? "Svátek" : "Zavřeno";
+      r.text = r.dalsi ? pred + ", otevíráme " + kdy(r.dalsi.iso) + " " + vCas(r.dalsi.od) : pred;
+      if (r.dalsi && r.dalsi.iso === DNES) r.text = "Otevíráme " + vCas(r.dalsi.od);
+      /* krátká verze pro úzká místa (megamenu): „Zavřeno, zítra 7:00“ */
+      r.kratce = r.dalsi ? (r.dalsi.iso === DNES ? "Otevíráme " + vCas(r.dalsi.od) : pred + ", " + kdy(r.dalsi.iso) + " " + bezNuly(r.dalsi.od)) : pred;
       return r;
     }
-    if (uvnitr) {
-      r.st = z ? "zastup" : "open";
-      r.text = (z ? (jeSvatek(DNES) ? "Sváteční provoz do " : "Omezený provoz, do ") : "Otevřeno do ") + bezNuly(bl[bl.length - 1]["do"]);
-      return r;
+
+    /* ---------- Texty karty ze stavu: dekorace webu i karta v panelu ---------- */
+    /* box upozornění: jen když platí zástup (zástup, zavřeno, omezený provoz) */
+    function upozorneni(r) {
+      var z = r.z;
+      if (!z) return null;
+      /* bez jména lékařky nese titulek název zastupující ordinace a text už jen adresu (údaj se neopakuje, rozhodnutí 20) */
+      var prvniVeta = z.vzkaz ? z.vzkaz.split(/(?<=\.)\s/)[0] : "", kdo = z.kdo || z.zoNazev, kde = z.kdo ? z.adresa : (z.zoAdresa || z.adresa);
+      var n = z.typ === "omezeny" ? zastupuje(z.ord, DNES, DNES) : [];
+      return {
+        titulek: z.typ === "zastup" ? (kdo ? "Zastupuje " + kdo : "Zástup do " + kratce(z["do"]))
+          : z.typ === "zavreno" ? "Zavřeno do " + kratce(z["do"])
+          : (jeSvatek(DNES) && hodinyZastupu(z) ? "Sváteční provoz" : "Omezený provoz") + (n.length ? ", zastupuje i " + n.join(" a ") : ""),
+        text: [z.typ === "zastup" ? ulice(kde) : "", prvniVeta].filter(Boolean).join(". ").replace(/\.\./g, ".")
+      };
     }
-    r.st = "closed"; r.dalsi = dalsiOtevreni(ord);
-    var pred = jeSvatek(DNES) ? "Svátek" : "Zavřeno";
-    r.text = r.dalsi ? pred + ", otevíráme " + kdy(r.dalsi.iso) + " " + vCas(r.dalsi.od) : pred;
-    if (r.dalsi && r.dalsi.iso === DNES) r.text = "Otevíráme " + vCas(r.dalsi.od);
-    /* krátká verze pro úzká místa (megamenu): „Zavřeno, zítra 7:00“ */
-    r.kratce = r.dalsi ? (r.dalsi.iso === DNES ? "Otevíráme " + vCas(r.dalsi.od) : pred + ", " + kdy(r.dalsi.iso) + " " + bezNuly(r.dalsi.od)) : pred;
-    return r;
+    /* Tlačítko Zavolat: během zástupu číslo zastupující ordinace, nikdy mrtvé číslo. format „cislo“ = jen číslo,
+       „kratce“ = bez čísla, jinak „Zavolat 568 842 358“. telVlastni = vlastní číslo ordinace (data-tel-vlastni).
+       Bez zástupu a bez vlastního čísla null: tlačítko zůstane, jak ho vyrenderoval server. */
+    function tlacitkoVolat(r, format, telVlastni) {
+      var z = r.z, zTel = z && z.typ === "zastup" && telOdkaz(z.tel) ? z.tel : "", cislo;
+      if (zTel) {
+        cislo = telText(zTel);
+        return { href: telOdkaz(zTel), text: format === "cislo" ? cislo : format === "kratce" ? "Zavolat zástup" : "Zavolat zástup " + cislo,
+          cislo: cislo, ariaLabel: "Zavolat zastupující ordinaci, " + cislo, zastup: true };
+      }
+      if (telVlastni && telOdkaz(telVlastni)) {
+        cislo = telText(telVlastni);
+        return { href: telOdkaz(telVlastni), text: format === "cislo" ? cislo : format === "kratce" ? "Zavolat" : "Zavolat " + cislo,
+          cislo: cislo, ariaLabel: null, zastup: false };
+      }
+      return null;
+    }
+    /* poznámka pod tlačítkem Zavolat (prázdná = skrýt) */
+    function poznamkaVolat(r) {
+      if (r.z && r.z.typ === "zastup") return "Během zástupu volejte zastupující ordinaci.";
+      if (r.st === "closed" && r.dalsi) return "Zavolat můžete " + kdy(r.dalsi.iso) + " od " + bezNuly(r.dalsi.od) + ".";
+      return "";
+    }
+    /* pořadí tlačítek (21. 10. 2026): online objednání je vždy hlavní a první, Zavolat druhé; engine pořadí nemění */
+    function objednaniPrvni() { return true; }
+
+    return {
+      ted: ted, dnes: DNES, min: MIN, dow: DOW, pasma: PASMA, zastupy: ZASTUPY,
+      kdy: kdy, pasmaDne: pasmaDne, zastupNaDen: zastupNaDen, maData: maData, blokyDne: blokyDne, dalsiOtevreni: dalsiOtevreni, stav: stav,
+      upozorneni: upozorneni, tlacitkoVolat: tlacitkoVolat, poznamkaVolat: poznamkaVolat, objednaniPrvni: objednaniPrvni,
+      ordinujeSe: ordinujeSe, svatkyVOkne: svatkyVOkne, zastupuje: zastupuje, zmenaDne: zmenaDne
+    };
   }
+
+  koren.MMEngine = {
+    vytvor: vytvor, jeSvatek: jeSvatek, velikonocniNedele: velikonocniNedele, datum: datum, cas: cas,
+    telOdkaz: telOdkaz, telText: telText, cisloTel: cisloTel, kratce: kratce, dlouze: dlouze, ulice: ulice,
+    plusDny: plusDny, isoDow: isoDow, hodinyZastupu: hodinyZastupu, kdoZastupuje: kdoZastupuje,
+    nazevSvatku: nazevSvatku, nazevBloku: nazevBloku, rozsahKratce: rozsahKratce, vycet: vycet
+  };
+
+  /* Bez DOM (panel na serveru, testy v Node) jen jádro, žádná dekorace. V prohlížeči ji vypne
+     globalThis.MMEngineBezDekorace = true nastavené před načtením (náhled zástupu v panelu: karta tam není z webu). */
+  if (typeof document === "undefined" || typeof location === "undefined" || koren.MMEngineBezDekorace) return;
+
+  /* ---------- Data z markupu ---------- */
+  function vse(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  /* Značky podmínek čte jen CSS (:has). Prvek, který nějakou obsahuje, engine nepřepisuje. */
+  var ZNACKY = "[data-mm-pole], [data-mm-podminky], [data-mm-kdyz-plne], [data-mm-kdyz-prazdne]";
+  function maZnacky(el) { return !!el.querySelector(ZNACKY); }
+  function napis(el, t) { if (!maZnacky(el)) el.textContent = t; }
+
+  var test = new URLSearchParams(location.search).get("ted");
+  var E = vytvor({
+    ted: test,
+    pasma: vse("[data-mm-pasmo]").map(function (el) { return el.dataset; }),
+    /* el: položka listu zástupů, podle ní data-mm-zobrazit níže pozná svůj zástup */
+    zastupy: vse("[data-mm-zastup]").map(function (el) { var d = Object.assign({}, el.dataset); d.el = el; return d; })
+  });
+  var DNES = E.dnes, DOW = E.dow, ZASTUPY = E.zastupy, ted = E.ted;
 
   /* ---------- Datum v textu (před ostatní dekorací) ----------
      Span s vazbou na Date pole nese data-mm-datum="kratce" („20. 10.“) nebo "dlouze" („20. října 2026“).
@@ -207,16 +359,10 @@
   }
   function prvniViditelny(sel, root) { return vse(sel, root).filter(function (el) { return viditelny(el, root); })[0] || null; }
 
-  /* Ordinace bez jakýchkoli dat (žádné pásmo ani zástup, např. stránka 404 bez cms-data): kořen zůstane bez dekorace,
-     platí neutrální text z markupu („Hodiny v detailu“). Jinak by engine tvrdil „Zavřeno“. */
-  function maData(ord) {
-    return PASMA.some(function (p) { return p.ord === ord; }) || ZASTUPY.some(function (z) { return z.ord === ord; });
-  }
-
   var cache = {};
   vse("[data-mm-ordinace]").forEach(function (root) {
-    if (!maData(root.dataset.mmOrdinace)) return;
-    var ord = root.dataset.mmOrdinace, r = cache[ord] || (cache[ord] = stav(ord)), z = r.z;
+    if (!E.maData(root.dataset.mmOrdinace)) return;
+    var ord = root.dataset.mmOrdinace, r = cache[ord] || (cache[ord] = E.stav(ord)), z = r.z;
 
     /* štítek: prvek s data-mm="badge" uvnitř, nebo kořen sám (čip na fotce) */
     var badges = vse('[data-mm="badge"]', root);
@@ -226,41 +372,28 @@
     text(root, "dnes", r.dnes);
 
     /* upozornění na kartě */
+    var u = E.upozorneni(r);
     vse('[data-mm="alert"]', root).forEach(function (alert) {
-      ukaz(alert, !!z);
-      if (!z) return;
-      /* bez jména lékařky nese titulek název zastupující ordinace a text už jen adresu (údaj se neopakuje) */
-      var kdo = z.kdo || z.zoNazev, kde = z.kdo ? z.adresa : (z.zoAdresa || z.adresa);
-      text(alert, "alert-title", z.typ === "zastup" ? (kdo ? "Zastupuje " + kdo : "Zástup do " + kratce(z["do"])) : (z.typ === "zavreno" ? "Zavřeno do " + kratce(z["do"]) : (jeSvatek(DNES) && hodinyZastupu(z) ? "Sváteční provoz" : "Omezený provoz") + (zastupuje(ord, DNES, DNES).length ? ", zastupuje i " + zastupuje(ord, DNES, DNES).join(" a ") : "")));
-      var prvniVeta = z.vzkaz ? z.vzkaz.split(/(?<=\.)\s/)[0] : "";
-      text(alert, "alert-text", [z.typ === "zastup" ? kde.replace(/,\s*\d{3}\s?\d{2}\s+[^,]+$/, "") : "", prvniVeta].filter(Boolean).join(". ").replace(/\.\./g, "."));
+      ukaz(alert, !!u);
+      if (!u) return;
+      text(alert, "alert-title", u.titulek);
+      text(alert, "alert-text", u.text);
     });
 
-    /* telefon: během zástupu číslo zastupující ordinace, nikdy mrtvé číslo.
-       Odkaz, text a aria-label dostanou VŠECHNA tlačítka v kořeni, i skryté varianty a Empty State. */
-    var zTel = z && z.typ === "zastup" && telOdkaz(z.tel) ? z.tel : "";
+    /* telefon: odkaz, text a aria-label dostanou VŠECHNA tlačítka v kořeni, i skryté varianty a Empty State.
+       Markup vyrenderovaný během zástupu, který mezitím skončil (nebo ?ted mimo zástup), vrátí na vlastní číslo. */
     vse('[data-mm="call"]', root).forEach(function (call) {
-      var f = call.dataset.format, vl = call.dataset.telVlastni, cislo;
-      if (zTel) {
-        cislo = telText(zTel);
-        call.setAttribute("href", telOdkaz(zTel));
-        text(call, "call-text", f === "cislo" ? cislo : f === "kratce" ? "Zavolat zástup" : "Zavolat zástup " + cislo);
-        call.setAttribute("aria-label", "Zavolat zastupující ordinaci, " + cislo);
-      } else if (vl && telOdkaz(vl)) {
-        /* markup vyrenderovaný během zástupu, který mezitím skončil (nebo ?ted mimo zástup): zpět na vlastní číslo */
-        cislo = telText(vl);
-        call.setAttribute("href", telOdkaz(vl));
-        text(call, "call-text", f === "cislo" ? cislo : f === "kratce" ? "Zavolat" : "Zavolat " + cislo);
-        call.removeAttribute("aria-label");
-      } else return;
-      text(call, "call-cislo", cislo);
+      var t = E.tlacitkoVolat(r, call.dataset.format, call.dataset.telVlastni);
+      if (!t) return;
+      call.setAttribute("href", t.href);
+      text(call, "call-text", t.text);
+      if (t.ariaLabel) call.setAttribute("aria-label", t.ariaLabel); else call.removeAttribute("aria-label");
+      text(call, "call-cislo", t.cislo);
     });
     /* poznámka pod tlačítkem: všechny v kořeni (položka listu i Empty State). Poznámku se značkami podmínek
        (varianta s číslem zástupu) engine nepřepisuje, jen ji ukáže během zástupu. */
     vse('[data-mm="call-note"]', root).forEach(function (note) {
-      var n = "";
-      if (z && z.typ === "zastup") n = "Během zástupu volejte zastupující ordinaci.";
-      else if (r.st === "closed" && r.dalsi) n = "Zavolat můžete " + kdy(r.dalsi.iso) + " od " + bezNuly(r.dalsi.od) + ".";
+      var n = E.poznamkaVolat(r);
       if (maZnacky(note)) { ukaz(note, !!(z && z.typ === "zastup")); return; }
       note.textContent = n; ukaz(note, !!n);
     });
@@ -283,33 +416,6 @@
      jen když by se aspoň v jeden ze dnů jinak ordinovalo. Texty jsou ve vzoru, engine doplní datum a název svátku.
      Režim „planovane“ (/provoz): okno od zítřka. Režim „nejblizsi“ (pruh na HP): okno od dneška, nechá jen nejbližší den se změnou,
      ostatní skryje a odkryje odkaz data-mm-dalsi-pro="#id". */
-  var NAZVY_SVATKU = { "01-01": "Nový rok", "05-01": "Svátek práce", "05-08": "Den vítězství", "07-05": "Den Cyrila a Metoděje",
-    "07-06": "Den upálení mistra Jana Husa", "09-28": "Den české státnosti", "10-28": "Den vzniku Československa",
-    "11-17": "Den boje za svobodu a demokracii", "12-24": "Štědrý den", "12-25": "1. svátek vánoční", "12-26": "2. svátek vánoční" };
-  function nazevSvatku(iso) { return NAZVY_SVATKU[iso.slice(5)] || (iso === plusDny(velikonocniNedele(+iso.slice(0, 4)), -2) ? "Velký pátek" : "Velikonoční pondělí"); }
-  function ordinujeSe(iso) {
-    var dow = isoDow(iso);
-    return PASMA.some(function (p) { return p.den === dow && (!p.platiOd || p.platiOd <= iso) && (!p.platiDo || iso <= p.platiDo); });
-  }
-  /* souvislé svátky v okně [od, do]; blok jen když by se v některý jeho den jinak ordinovalo */
-  function svatkyVOkne(od, dO) {
-    var bloky = [], b = null;
-    for (var d = od; d <= dO; d = plusDny(d, 1)) {
-      if (!jeSvatek(d)) { b = null; continue; }
-      if (b) b["do"] = d; else { b = { od: d, "do": d }; bloky.push(b); }
-    }
-    return bloky.filter(function (x) {
-      for (var d = x.od; d <= x["do"]; d = plusDny(d, 1)) if (ordinujeSe(d)) return true;
-      return false;
-    });
-  }
-  function nazevBloku(b) {
-    if (b.od === b["do"]) return nazevSvatku(b.od);
-    if (b.od.slice(5) === "12-24" && b["do"].slice(5) === "12-26") return "Vánoční svátky";
-    var n = []; for (var d = b.od; d <= b["do"]; d = plusDny(d, 1)) n.push(nazevSvatku(d));
-    return n.join(", ");
-  }
-  function rozsahKratce(od, dO) { return kratce(od) + (dO !== od ? "–" + kratce(dO) : ""); }
   var PORADI_TYPU = { svatek: 0, omezeny: 1, zastup: 2, zavreno: 3 };
   vse("[data-mm-po-dnech]").forEach(function (seznam) {
     var rezim = seznam.dataset.mmPoDnech, id = "#" + seznam.id;
@@ -323,7 +429,7 @@
     var zacatek = rezim === "planovane" ? plusDny(DNES, 1) : DNES, konec = plusDny(DNES, dni);
     var vzor = document.querySelector('[data-mm-svatek-vzor="' + id + '"]');
     var rodic = radky.length ? radky[0].obal.parentNode : seznam;
-    var svatky = vzor ? svatkyVOkne(zacatek, konec) : [];
+    var svatky = vzor ? E.svatkyVOkne(zacatek, konec) : [];
     svatky.forEach(function (b) {
       var k = vzor.cloneNode(true);
       k.removeAttribute("data-mm-svatek-vzor"); k.removeAttribute("id");
@@ -384,17 +490,9 @@
     var s = vse("main [data-mm-ordinace]").map(function (el) { return el.dataset.mmOrdinace; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
     return s.length === 1 ? s[0] : "";
   })();
-  function zastupuje(ord, od, dO) {
-    var n = [];
-    ZASTUPY.forEach(function (z) {
-      if (z.typ === "zastup" && z.zoSlug === ord && z.nazev && z.od <= dO && od <= z["do"] && n.indexOf(z.nazev) < 0) n.push(z.nazev);
-    });
-    return n;
-  }
-  function vycet(n) { return (n.length > 1 ? "ordinace " + n.slice(0, -1).join(", ") + " a " + n[n.length - 1] : "ordinaci " + n[0]); }
   if (STRANKA) vse('[data-mm-varianta="Omezený provoz"]').forEach(function (blok) {
     var nos = blok.closest("[data-od]"); if (!nos) return;
-    var n = zastupuje(STRANKA, datum(nos.dataset.od), datum(nos.dataset["do"]));
+    var n = E.zastupuje(STRANKA, datum(nos.dataset.od), datum(nos.dataset["do"]));
     vse(".mm-zastupuje-i", blok).forEach(function (x) { x.remove(); });
     if (!n.length) return;
     var v = document.createElement("span");
@@ -429,12 +527,7 @@
     var ord = tab.dataset.mmOrdinace || (koren && koren.dataset.mmOrdinace) || STRANKA;
     if (!ord) return;
     vse("[data-mm-den]", tab).forEach(function (row) {
-      var iso = plusDny(DNES, +row.dataset.mmDen - DOW), z = zastupNaDen(ord, iso), sv = jeSvatek(iso), h = hodinyZastupu(z), t = "";
-      var rozsah = h ? bezNuly(h[0].od) + "–" + bezNuly(h[0]["do"]) : "";
-      if (z && z.typ === "zastup") t = "zastupuje " + (z.kdo || (z.zoNazev ? "ordinace " + z.zoNazev : "jiná ordinace")) + (rozsah ? ", " + rozsah : "");
-      else if (z && z.typ === "zavreno") t = sv ? nazevSvatku(iso) + ", zavřeno" : "zavřeno";
-      else if (z && h) t = (sv ? "sváteční provoz " : "omezený provoz ") + rozsah + (zastupuje(ord, iso, iso).length ? ", zastupuje i " + vycet(zastupuje(ord, iso, iso)) : "");
-      else if (sv && PASMA.some(function (x) { return x.ord === ord && x.den === isoDow(iso) && (!x.platiOd || x.platiOd <= iso) && (!x.platiDo || iso <= x.platiDo); })) t = nazevSvatku(iso) + ", zavřeno";
+      var iso = plusDny(DNES, +row.dataset.mmDen - DOW), zm = E.zmenaDne(ord, iso), t = zm ? zm.text : "";
       vse(".hodiny_zmena", row).forEach(function (el) { el.remove(); });
       row.classList.toggle("is-zmena", !!t);
       if (!t) return;
@@ -537,5 +630,5 @@
   }
 
   /* k ladění v konzoli (a pro testy) */
-  window.MM = { ted: DNES + " " + ted.slice(11), stav: stav, jeSvatek: jeSvatek, velikonocniNedele: velikonocniNedele, datum: datum, telOdkaz: telOdkaz };
-})();
+  window.MM = { ted: E.ted, stav: E.stav, jeSvatek: jeSvatek, velikonocniNedele: velikonocniNedele, datum: datum, telOdkaz: telOdkaz };
+})(typeof globalThis !== "undefined" ? globalThis : window);
