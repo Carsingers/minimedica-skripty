@@ -108,7 +108,7 @@
   var ZASTUPY = vse("[data-mm-zastup]").map(function (el) {
     var d = el.dataset;
     return { el: el, ord: d.ordinace, typ: TYP[String(d.typ || "").toLowerCase()] || "zastup",
-      od: datum(d.od), "do": datum(d["do"]), kdo: d.kdo || "", zoNazev: d.zoNazev || "", zoAdresa: d.zoAdresa || "",
+      od: datum(d.od), "do": datum(d["do"]), kdo: d.kdo || "", nazev: d.nazev || "", zoSlug: d.zoSlug || "", zoNazev: d.zoNazev || "", zoAdresa: d.zoAdresa || "",
       adresa: d.zoAdresa ? [d.zoNazev, d.zoAdresa].filter(Boolean).join(", ") : (d.adresa || ""),
       tel: d.zoTel || d.tel || "", hodiny: d.hodiny || "", vzkaz: d.vzkaz || "" };
   }).filter(function (z) { return z.ord && z.od && z["do"]; });
@@ -231,7 +231,7 @@
       if (!z) return;
       /* bez jména lékařky nese titulek název zastupující ordinace a text už jen adresu (údaj se neopakuje) */
       var kdo = z.kdo || z.zoNazev, kde = z.kdo ? z.adresa : (z.zoAdresa || z.adresa);
-      text(alert, "alert-title", z.typ === "zastup" ? (kdo ? "Zastupuje " + kdo : "Zástup do " + kratce(z["do"])) : (z.typ === "zavreno" ? "Zavřeno do " + kratce(z["do"]) : (jeSvatek(DNES) && hodinyZastupu(z) ? "Sváteční provoz" : "Omezený provoz")));
+      text(alert, "alert-title", z.typ === "zastup" ? (kdo ? "Zastupuje " + kdo : "Zástup do " + kratce(z["do"])) : (z.typ === "zavreno" ? "Zavřeno do " + kratce(z["do"]) : (jeSvatek(DNES) && hodinyZastupu(z) ? "Sváteční provoz" : "Omezený provoz") + (zastupuje(ord, DNES, DNES).length ? ", zastupuje i " + zastupuje(ord, DNES, DNES).join(" a ") : "")));
       var prvniVeta = z.vzkaz ? z.vzkaz.split(/(?<=\.)\s/)[0] : "";
       text(alert, "alert-text", [z.typ === "zastup" ? kde.replace(/,\s*\d{3}\s?\d{2}\s+[^,]+$/, "") : "", prvniVeta].filter(Boolean).join(". ").replace(/\.\./g, "."));
     });
@@ -338,6 +338,11 @@
     /* den, od kterého řádek platí (běžící zástup = dnes) */
     viditelne.forEach(function (r) { r.den = r.od < DNES ? DNES : r.od; });
     viditelne.sort(function (a, b) { return a.den < b.den ? -1 : a.den > b.den ? 1 : PORADI_TYPU[a.typ] - PORADI_TYPU[b.typ]; });
+    /* data-mm-jeden (detail ordinace, 16. 11. 2026): jen jeden pruh. Běží-li dnes zástup (viditelný [data-mm-zobrazit="bezi"] vedle seznamu),
+       plánované se neukážou vůbec; jinak nejbližší den včetně dnešního svátku. */
+    if (seznam.hasAttribute("data-mm-jeden") && vse('[data-mm-zobrazit="bezi"]', seznam.parentNode).some(function (el) {
+      return !seznam.contains(el) && !el.classList.contains("hide");
+    })) { viditelne.forEach(function (r) { ukaz(r.el, false); }); viditelne = []; }
     if (rezim === "nejblizsi" && viditelne.length) {
       var den = viditelne[0].den, skryte = 0;
       viditelne = viditelne.filter(function (r) {
@@ -371,6 +376,35 @@
     }
   });
 
+  /* ---------- Kdo koho zastupuje (16. 11. 2026) ----------
+     Zastupující ordinace má ten den vlastní omezený provoz. Bez věty „Zastupujeme i ordinaci Hájek.“ to na jejím detailu vypadalo
+     jen jako zkrácené hodiny bez důvodu. Zástupy nesou data-nazev (Ordinace › Název) a data-zo-slug (Zastupující ordinace › Slug).
+     Ordinace stránky (STRANKA) = jediný slug mezi kořeny v main (detail); na HP a /ordinace jich je víc, tam se věta nepřidává. */
+  var STRANKA = (function () {
+    var s = vse("main [data-mm-ordinace]").map(function (el) { return el.dataset.mmOrdinace; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+    return s.length === 1 ? s[0] : "";
+  })();
+  function zastupuje(ord, od, dO) {
+    var n = [];
+    ZASTUPY.forEach(function (z) {
+      if (z.typ === "zastup" && z.zoSlug === ord && z.nazev && z.od <= dO && od <= z["do"] && n.indexOf(z.nazev) < 0) n.push(z.nazev);
+    });
+    return n;
+  }
+  function vycet(n) { return (n.length > 1 ? "ordinace " + n.slice(0, -1).join(", ") + " a " + n[n.length - 1] : "ordinaci " + n[0]); }
+  if (STRANKA) vse('[data-mm-varianta="Omezený provoz"]').forEach(function (blok) {
+    var nos = blok.closest("[data-od]"); if (!nos) return;
+    var n = zastupuje(STRANKA, datum(nos.dataset.od), datum(nos.dataset["do"]));
+    vse(".mm-zastupuje-i", blok).forEach(function (x) { x.remove(); });
+    if (!n.length) return;
+    var v = document.createElement("span");
+    v.className = "mm-zastupuje-i";
+    v.textContent = "Zastupujeme i " + vycet(n) + ". ";
+    var hodiny = vse(":scope > [data-mm-prazdne]", blok)[0];
+    if (hodiny) hodiny.parentNode.insertBefore(v, hodiny.nextSibling);
+    else { blok.appendChild(document.createTextNode(" ")); blok.appendChild(v); }
+  });
+
   /* ---------- Hodiny: zvýraznit dnešek ---------- */
   vse('[data-mm="hodiny"] [data-mm-den]').forEach(function (row) { row.classList.toggle("is-today", +row.dataset.mmDen === DOW); });
   /* Platnost pásem v tabulce (stejná podmínka jako pasmaDne, ať se stav a zobrazení nerozejdou).
@@ -385,20 +419,20 @@
     });
     if (polozky.length) row.classList.toggle("is-zavreno", !polozky.some(function (it) { return viditelny(it, row); }));
   });
-  /* Změny v nejbližších 7 dnech přímo v tabulce (v1.0.11, 16. 11. 2026): tabulka ukazuje běžné hodiny, ale den, kdy platí něco jiného
+  /* Změny v aktuálním týdnu (po–ne, v1.0.12; v1.0.11 bralo dnes + 6 dní a v den Vánoc ukazovalo pondělí 28. 12.) přímo v tabulce: tabulka ukazuje běžné hodiny, ale den, kdy platí něco jiného
      (svátek, zástup, zavřeno, omezený provoz), dostane is-zmena a poznámku s datem („24. 12.: Štědrý den, zavřeno“), běžná pásma ztlumí CSS.
      Jinak by 24. 12. stálo u „Dnes“ čtvrtek s běžnými hodinami a karta nahoře by tvrdila zavřeno. Ordinaci bere z data-mm-ordinace
      tabulky, jinak z první ordinace na stránce (šablona). Bez JS zůstane věta „Ve státní svátky je zavřeno.“ */
   vse('[data-mm="hodiny"]').forEach(function (tab) {
-    var koren = tab.closest("[data-mm-ordinace]") || document.querySelector("[data-mm-ordinace]");
-    var ord = tab.dataset.mmOrdinace || (koren && koren.dataset.mmOrdinace);
+    var koren = tab.closest("[data-mm-ordinace]");
+    var ord = tab.dataset.mmOrdinace || (koren && koren.dataset.mmOrdinace) || STRANKA;
     if (!ord) return;
     vse("[data-mm-den]", tab).forEach(function (row) {
-      var iso = plusDny(DNES, (+row.dataset.mmDen - DOW + 7) % 7), z = zastupNaDen(ord, iso), sv = jeSvatek(iso), h = hodinyZastupu(z), t = "";
+      var iso = plusDny(DNES, +row.dataset.mmDen - DOW), z = zastupNaDen(ord, iso), sv = jeSvatek(iso), h = hodinyZastupu(z), t = "";
       var rozsah = h ? bezNuly(h[0].od) + "–" + bezNuly(h[0]["do"]) : "";
       if (z && z.typ === "zastup") t = "zastupuje " + (z.kdo || (z.zoNazev ? "ordinace " + z.zoNazev : "jiná ordinace")) + (rozsah ? ", " + rozsah : "");
       else if (z && z.typ === "zavreno") t = sv ? nazevSvatku(iso) + ", zavřeno" : "zavřeno";
-      else if (z && h) t = (sv ? "sváteční provoz " : "omezený provoz ") + rozsah;
+      else if (z && h) t = (sv ? "sváteční provoz " : "omezený provoz ") + rozsah + (zastupuje(ord, iso, iso).length ? ", zastupuje i " + vycet(zastupuje(ord, iso, iso)) : "");
       else if (sv && PASMA.some(function (x) { return x.ord === ord && x.den === isoDow(iso) && (!x.platiOd || x.platiOd <= iso) && (!x.platiDo || iso <= x.platiDo); })) t = nazevSvatku(iso) + ", zavřeno";
       vse(".hodiny_zmena", row).forEach(function (el) { el.remove(); });
       row.classList.toggle("is-zmena", !!t);
