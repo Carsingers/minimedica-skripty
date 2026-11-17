@@ -75,7 +75,8 @@
   function kratce(iso) { return (+iso.slice(8, 10)) + ". " + (+iso.slice(5, 7)) + "."; }
   function dlouze(iso) { return (+iso.slice(8, 10)) + ". " + MES[+iso.slice(5, 7) - 1] + " " + iso.slice(0, 4); }
   /* adresa bez PSČ a města: „Kubišova 1291/7, 674 01 Třebíč“ → „Kubišova 1291/7“ */
-  function ulice(a) { return String(a || "").replace(/,\s*\d{3}\s?\d{2}\s+[^,]+$/, ""); }
+  /* bez PSČ, s městem: „Kubišova 1291/7, 674 01 Třebíč“ → „Kubišova 1291/7, Třebíč“ (klientka 17. 11. 2026: jen ulice nestačí) */
+  function ulice(a) { return String(a || "").replace(/,\s*\d{3}\s?\d{2}\s+([^,]+)$/, ", $1"); }
 
   /* ---------- Telefon ----------
      Pole typu Phone vypisují číslo tak, jak je v CMS („568 842 358“, „+420 568 842 358“), Link › Phone stejně do href.
@@ -227,9 +228,9 @@
       r.dnes = bl.length ? bl[0].od + "–" + bl[bl.length - 1]["do"] : (jeSvatek(DNES) ? "Svátek, zavřeno" : "Zavřeno");
       if (z && z.typ === "zastup") {
         r.st = "zastup"; r.text = "Zástup do " + kratce(z["do"]);
-        /* že jde o zástup, říká jantarový štítek a box, neopakujeme. Bez hodin (zástup mimo síť) nikdy vlastní pásma:
-           ordinace je zavřená a hodiny určuje zastupující lékařka (zátěžový test Vánoce 2026). */
-        r.dnes = z.hodiny || "Podle zastupující ordinace";
+        /* zastupovaná ordinace je zavřená: nikdy hodiny (ani zastupující ordinace, rodič by jel do zavřené ordinace).
+           Hodiny zástupu ukáže box a panel Kam jít (klientka 16. 11. 2026). */
+        r.dnes = "Dovolená, zavřeno";
         return r;
       }
       if (z && z.typ === "zavreno") {
@@ -544,11 +545,11 @@
   /* ---------- Co s sebou: Rich text nedovolí role na ul a list-style: none v Safari bere seznamu sémantiku ---------- */
   vse(".info-box_richtext ul").forEach(function (ul) { ul.setAttribute("role", "list"); });
 
-  /* ---------- Ulice: prvek s celým polem Adresa („Kubišova 1291/7, 674 01 Třebíč“) zkrátí na text před první čárkou.
-     Bez JS zůstane celá adresa. Prázdné pole (w-dyn-bind-empty) a adresu bez čárky nechá být. ---------- */
+  /* ---------- Ulice: prvek s celým polem Adresa („Kubišova 1291/7, 674 01 Třebíč“) zkrátí na ulici a město bez PSČ
+     („Kubišova 1291/7, Třebíč“). Bez JS zůstane celá adresa. Prázdné pole (w-dyn-bind-empty) a adresu bez PSČ nechá být. ---------- */
   vse("[data-mm-ulice]").forEach(function (el) {
-    var t = el.textContent.trim(), i = t.indexOf(",");
-    if (i > 0 && !el.classList.contains("w-dyn-bind-empty")) napis(el, t.slice(0, i).trim());
+    var t = el.textContent.trim(), u = ulice(t);
+    if (u !== t && !el.classList.contains("w-dyn-bind-empty")) napis(el, u);
   });
 
   /* ---------- Dnešní datum ---------- */
