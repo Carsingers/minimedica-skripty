@@ -74,7 +74,6 @@
   function vCas(c) { var h = +c.slice(0, 2); return ([2, 3, 4, 12, 13, 14, 20, 22, 23].indexOf(h) > -1 ? "ve " : "v ") + bezNuly(c); }
   function kratce(iso) { return (+iso.slice(8, 10)) + ". " + (+iso.slice(5, 7)) + "."; }
   function dlouze(iso) { return (+iso.slice(8, 10)) + ". " + MES[+iso.slice(5, 7) - 1] + " " + iso.slice(0, 4); }
-  /* adresa bez PSČ a města: „Kubišova 1291/7, 674 01 Třebíč“ → „Kubišova 1291/7“ */
   /* bez PSČ, s městem: „Kubišova 1291/7, 674 01 Třebíč“ → „Kubišova 1291/7, Třebíč“ (klientka 17. 11. 2026: jen ulice nestačí) */
   function ulice(a) { return String(a || "").replace(/,\s*\d{3}\s?\d{2}\s+([^,]+)$/, ", $1"); }
 
@@ -571,7 +570,7 @@
       var d = btn.dataset, nazev = String(d.nazev || "").trim(), tel = telOdkaz(d.tel).slice(4);
       var fn = /^MiniMedica\b/i.test(nazev) ? nazev : ("MiniMedica " + nazev).trim();
       var v = ["BEGIN:VCARD", "VERSION:3.0", "FN:" + fn, "ORG:MiniMedica", tel ? "TEL;TYPE=WORK,VOICE:" + tel : "",
-        d.email ? "EMAIL;TYPE=WORK:" + d.email : "", "ADR;TYPE=WORK:;;" + (d.adresa || "").replace(/,/g, "\\,") + ";;;;", "URL:" + location.href.split("?")[0], "END:VCARD"]
+        d.email ? "EMAIL;TYPE=WORK:" + d.email : "", "ADR;TYPE=WORK:;;" + (d.adresa || "").replace(/\u00a0/g, " ").replace(/,/g, "\\,") + ";;;;", "URL:" + location.href.split("?")[0], "END:VCARD"]
         .filter(Boolean).join("\r\n");
       var a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([v], { type: "text/vcard;charset=utf-8" }));

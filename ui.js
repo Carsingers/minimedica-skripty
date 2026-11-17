@@ -127,7 +127,7 @@
      souřadnice jen jako záloha bez adresy. Bez obojího zůstane #kontakt a mapa se skryje. */
   function souradnice(v) { var n = parseFloat(String(v == null ? "" : v).replace(",", ".")); return isFinite(n) ? n : NaN; }
   document.querySelectorAll("[data-mm-mapa]").forEach(function (m) {
-    var lat = souradnice(m.dataset.lat), lng = souradnice(m.dataset.lng), adresa = String(m.dataset.adresa || "").trim();
+    var lat = souradnice(m.dataset.lat), lng = souradnice(m.dataset.lng), adresa = String(m.dataset.adresa || "").replace(/\u00a0/g, " ").trim(); /* PSČ má v CMS pevnou mezeru, mapám stačí běžná */
     var bod = !(isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (!lat && !lng));
     if (!bod && !adresa) { m.classList.add("hide"); return; }
     (m.closest("section") || document).querySelectorAll('[data-mm="navigovat"]').forEach(function (a) {
