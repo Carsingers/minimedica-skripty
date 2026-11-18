@@ -121,26 +121,32 @@
     var mm = gsap.matchMedia();
     mm.add("(prefers-reduced-motion: no-preference)", function () {
 
-      /* Úvod stránky: nadpis po řádcích, pak perex, tlačítka a stav; fotka se otevře, čipy se usadí, při scrollu fotka zůstává pozadu */
+      /* Úvod stránky: nadpis po řádcích, pak perex, tlačítka a stav; fotka se otevře, čipy se usadí, při scrollu fotka zůstává pozadu.
+         Hraje se jen, když je úvod ještě schovaný (mm-intro). Na mobilu ho hlavička neschovává (výkon: nadpis je vidět hned, nečeká na skripty)
+         a po pojistce už je vidět taky: tam by animace „from“ nejdřív schovala, co čtenář už čte, takže úvod zůstane stát. */
+      var uvod = document.documentElement.classList.contains("mm-intro");
       var tl = gsap.timeline({ defaults: { ease: EASE } });
       var h1 = document.querySelector("main h1");
       if (h1) {
-        var box = h1.closest(".hero-split_component > div, .home-hero_content") || h1.parentElement;
-        var okolo = volne(vse(":scope > *", box)).filter(function (el) { return el !== h1 && !el.contains(h1) && el.getBoundingClientRect().top < innerHeight && !el.matches("img, figure, .cms-richtext, .stats_component"); });
-        tl.add(revealNadpisu(h1), 0.05);
-        if (okolo.length) tl.from(okolo, bezPrechodu(okolo, { y: 16, autoAlpha: 0, duration: 0.8, stagger: 0.07 }), 0.35);
-        oznac([h1]); oznac(okolo);
+        if (uvod) {
+          var box = h1.closest(".hero-split_component > div, .home-hero_content") || h1.parentElement;
+          var okolo = volne(vse(":scope > *", box)).filter(function (el) { return el !== h1 && !el.contains(h1) && el.getBoundingClientRect().top < innerHeight && !el.matches("img, figure, .cms-richtext, .stats_component"); });
+          tl.add(revealNadpisu(h1), 0.05);
+          if (okolo.length) tl.from(okolo, bezPrechodu(okolo, { y: 16, autoAlpha: 0, duration: 0.8, stagger: 0.07 }), 0.35);
+          oznac(okolo);
+        }
+        oznac([h1]);
         oznac(vse(".hero-split_component > div:first-child *, .home-hero_content *"));
       }
       var img = document.querySelector(".home-hero_image, .hero-split_image");
       if (img) {
-        tl.from(img, { clipPath: "inset(18% 0% 0% 0% round 20px)", scale: 1.05, duration: 1.3, ease: "expo.out" }, 0);
+        if (uvod) tl.from(img, { clipPath: "inset(18% 0% 0% 0% round 20px)", scale: 1.05, duration: 1.3, ease: "expo.out" }, 0);
         var fig = img.closest("figure");
         if (fig) gsap.to(fig, { y: 48, ease: "none", scrollTrigger: { trigger: fig, start: "top top+=80", end: "bottom top", scrub: true } });
         oznac([img]);
       }
       var chips = vse(".home-hero_figure .hero-chip_component, .hero-split_figure .hero-chip_component");
-      if (chips.length) { tl.from(chips, bezPrechodu(chips, { y: 14, scale: 0.96, autoAlpha: 0, duration: 0.6, stagger: 0.14 }), 0.7); oznac(chips); }
+      if (chips.length) { if (uvod) tl.from(chips, bezPrechodu(chips, { y: 14, scale: 0.96, autoAlpha: 0, duration: 0.6, stagger: 0.14 }), 0.7); oznac(chips); }
       ukazUvod();
 
       /* Nadpisy sekcí: řádky vyjedou zpoza masky, jakmile k nim čtenář dojede */
